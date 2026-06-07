@@ -1,0 +1,26 @@
+Mneme
+Copyright 2026 Mneme contributors
+
+This product includes software developed by the Mneme project
+(https://github.com/sargeMonkey/mneme).
+
+Licensed under the Apache License, Version 2.0.
+
+---
+
+This product includes prompt templates derived from work by Zep AI
+(https://github.com/getzep/graphiti), licensed under the Apache License,
+Version 2.0. Derived prompt files carry their original copyright headers
+and an attribution comment indicating the upstream origin.
+
+Specifically, the following Mneme files contain content ported and adapted
+from graphiti_core/prompts/* (Apache 2.0, Copyright Zep AI):
+
+  src/Mneme/Distillation/Prompts/ExtractEntities.cs       (when added)
+  src/Mneme/Distillation/Prompts/ExtractEdges.cs          (when added)
+  src/Mneme/Distillation/Prompts/DedupeEntities.cs        (when added)
+  src/Mneme/Distillation/Prompts/InvalidateEdges.cs       (when added)
+
+Each such file includes an "// Adapted from: getzep/graphiti, Apache 2.0"
+header on first use. No upstream code is bundled verbatim; only prompt
+template strings, with attribution.

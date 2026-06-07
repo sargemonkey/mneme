@@ -1,0 +1,50 @@
+## .NET build outputs
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+## Visual Studio / Rider
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vscode/
+*.code-workspace
+
+## NuGet
+*.nupkg
+*.snupkg
+.nuget/
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+## Testing
+TestResults/
+*.coverage
+*.coveragexml
+coverage*.json
+coverage*.xml
+coverage*.info
+
+## OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+## Local environment
+*.env
+*.env.local
+.env.*.local
+local.settings.json
+
+## Mneme-specific
+*.mneme.db
+*.mneme.db-journal
+*.mneme.db-wal
+*.mneme.db-shm
+local-data/
+scratch/

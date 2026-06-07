@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>Mneme.Mcp</PackageId>
+    <Title>Mneme.Mcp</Title>
+    <Description>MCP server interface for Mneme. Exposes Mneme memory APIs as Model Context Protocol tools so any ACP / Copilot / Claude / Cursor client can query an agent chronological memory via standard MCP transport.</Description>
+    <PackageTags>memory;agent;ai;mcp;model-context-protocol;mneme</PackageTags>
+    <Version>0.0.1-alpha.1</Version>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Mneme\Mneme.csproj" />
+    <ProjectReference Include="..\Mneme.Contracts\Mneme.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\LICENSE" Pack="true" PackagePath="\" />
+    <None Include="..\..\NOTICE" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>

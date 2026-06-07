@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Mneme.Contracts/Mneme.Contracts.csproj" />
+    <Project Path="src/Mneme.Mcp/Mneme.Mcp.csproj" />
+    <Project Path="src/Mneme/Mneme.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Mneme.Contracts.Tests/Mneme.Contracts.Tests.csproj" />
+    <Project Path="tests/Mneme.Tests/Mneme.Tests.csproj" />
+  </Folder>
+</Solution>
