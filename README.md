@@ -13,6 +13,12 @@ sees into useful, queryable, point-in-time-correct knowledge.
 **Status:** Design and planning phase. Schema and architecture are locked
 (see [`plans/`](plans/)); no code yet. Open for design feedback; pre-alpha.
 
+> **Working on this repo (human or AI agent)?** Start with
+> **[`AGENTS.md`](AGENTS.md)** for read order, conventions, locked
+> decisions, and build commands, then open
+> **[`plans/backlog.md`](plans/backlog.md)** for the dependency-ordered
+> task list.
+
 ---
 
 ## What Mneme is (technically)
@@ -64,6 +70,8 @@ engineering. Three things made it worth lifting out:
 
 ```
 mneme/
+├── AGENTS.md                    # ← Start here if you're contributing
+├── CHANGELOG.md
 ├── src/
 │   ├── Mneme.Contracts/         # Interfaces + DTOs — NuGet-shippable
 │   ├── Mneme/                   # The memory agent implementation
@@ -72,10 +80,13 @@ mneme/
 │   ├── Mneme.Contracts.Tests/
 │   └── Mneme.Tests/
 ├── docs/                        # Architecture, schema, ADRs (forthcoming)
-└── plans/                       # Planning + research artifacts
-    ├── plan.md                  # 11-phase build plan, full v3+ scope
-    ├── research-existing-systems.md       # Survey of 19 systems
-    └── research-zep-sqlite-deepdive.md    # Why SQLite is enough (with proofs)
+├── plans/                       # Planning + research artifacts
+│   ├── plan.md                  # 11-phase build plan, full v3+ scope
+│   ├── backlog.md               # Dependency-ordered task list (per phase)
+│   ├── research-existing-systems.md       # Survey of 19 systems
+│   ├── research-zep-sqlite-deepdive.md    # Why SQLite is enough (with proofs)
+│   └── consumer-architecture-reference.md # How a cockpit wires Mneme in
+└── .github/copilot-instructions.md  # GitHub Copilot entry point → AGENTS.md
 ```
 
 ## Status & roadmap
@@ -95,7 +106,8 @@ mneme/
 | 10. Cloud snapshot sync | not started | Idempotent append-only merge to S3 |
 | 11. (v2) Autonomous capture + vector search | not started | Heuristic capture + sqlite-vec |
 
-Full plan: [`plans/plan.md`](plans/plan.md).
+Full plan: [`plans/plan.md`](plans/plan.md). Actionable, dependency-ordered
+task list: [`plans/backlog.md`](plans/backlog.md).
 
 ## Design pressure-test
 
@@ -122,3 +134,7 @@ See [`NOTICE`](NOTICE) for attribution.
 
 Pre-alpha. Issues for design feedback are very welcome; PRs against an
 empty codebase less so. Open an issue to discuss anything in [`plans/`](plans/).
+
+For day-to-day conventions, build commands, locked decisions, and the
+"don't do this" list, read [`AGENTS.md`](AGENTS.md). For code-of-conduct
+and PR mechanics, see [`CONTRIBUTING.md`](CONTRIBUTING.md).
