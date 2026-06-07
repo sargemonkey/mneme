@@ -16,8 +16,8 @@
     <Product>Mneme</Product>
     <Copyright>Copyright (c) 2026 Mneme contributors</Copyright>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/sargeMonkey/mneme</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/sargeMonkey/mneme</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/jacobmsft/mneme</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/jacobmsft/mneme</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
