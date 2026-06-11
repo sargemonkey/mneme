@@ -13,37 +13,35 @@
 else
 {
     <div class="row g-3 my-3">
-        <div class="col-md-3">
-            <div class="card">
-                <div class="card-body">
-                    <h6 class="card-subtitle text-muted">Events</h6>
-                    <div class="display-5">@_metrics.TotalEvents</div>
-                </div>
-            </div>
+        <div class="col-md-2">
+            <div class="card"><div class="card-body">
+                <h6 class="card-subtitle text-muted">Events</h6>
+                <div class="display-5">@_metrics.TotalEvents</div>
+            </div></div>
         </div>
-        <div class="col-md-3">
-            <div class="card">
-                <div class="card-body">
-                    <h6 class="card-subtitle text-muted">Queued for distillation</h6>
-                    <div class="display-5">@_metrics.QueuedForDistillation</div>
-                </div>
-            </div>
+        <div class="col-md-2">
+            <div class="card"><div class="card-body">
+                <h6 class="card-subtitle text-muted">Queued</h6>
+                <div class="display-5">@_metrics.QueuedForDistillation</div>
+            </div></div>
         </div>
-        <div class="col-md-3">
-            <div class="card">
-                <div class="card-body">
-                    <h6 class="card-subtitle text-muted">Workstreams</h6>
-                    <div class="display-5">@_metrics.Workstreams</div>
-                </div>
-            </div>
+        <div class="col-md-2">
+            <div class="card"><div class="card-body">
+                <h6 class="card-subtitle text-muted">Workstreams</h6>
+                <div class="display-5">@_metrics.Workstreams</div>
+            </div></div>
         </div>
-        <div class="col-md-3">
-            <div class="card">
-                <div class="card-body">
-                    <h6 class="card-subtitle text-muted">Revoked</h6>
-                    <div class="display-5">@_metrics.Revoked</div>
-                </div>
-            </div>
+        <div class="col-md-2">
+            <div class="card"><div class="card-body">
+                <h6 class="card-subtitle text-muted">Revoked</h6>
+                <div class="display-5">@_metrics.Revoked</div>
+            </div></div>
+        </div>
+        <div class="col-md-4">
+            <div class="card"><div class="card-body">
+                <h6 class="card-subtitle text-muted">Projections</h6>
+                <small>facts: <strong>@_metrics.ProjectionFacts</strong> · decisions: <strong>@_metrics.ProjectionDecisions</strong> · goals: <strong>@_metrics.ProjectionGoals</strong> · hypotheses: <strong>@_metrics.ProjectionHypotheses</strong></small>
+            </div></div>
         </div>
     </div>
 
@@ -87,8 +85,8 @@ else
 <ul>
     <li>Phase 0 — Contracts: <strong>shipped</strong>.</li>
     <li>Phase 1 — Event log + SQLite: <strong>shipped</strong>.</li>
-    <li>Phase 2 — Classification + revocation: <strong>shipped</strong> (classification column, RuleBasedClassifier, LlmClassifier scaffold, IRevocationService, AddMneme DI ergonomic).</li>
-    <li>Phase 3 — Projections: <em>pending</em>.</li>
+    <li>Phase 2 — Classification + revocation: <strong>shipped</strong>.</li>
+    <li>Phase 3 — Projections + text index: <strong>shipped</strong> (facts/decisions/goals/hypotheses projectors, event_processing_log, FTS5 + adaptive-BM25 search).</li>
     <li>Phase 4 — Capability-checked query API: <em>pending</em>.</li>
     <li>Phase 5 — Distillation pipeline: <em>pending</em>.</li>
     <li>Phase 6 — Conservative entity resolution: <em>pending</em>.</li>

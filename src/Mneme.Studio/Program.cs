@@ -30,12 +30,21 @@ builder.Services.AddSingleton<IRedactor, RegexRedactor>();
 builder.Services.AddSingleton<IContentShapeSelector, AlwaysRedactedContent>();
 builder.Services.AddSingleton<Mneme.Classification.IClassifier, Mneme.Classification.RuleBasedClassifier>();
 builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
+builder.Services.AddSingleton<Mneme.Projections.ProjectorPipeline>(sp =>
+    new Mneme.Projections.ProjectorPipeline(sp.GetRequiredService<SqliteConnectionFactory>()));
+builder.Services.AddSingleton<Mneme.Search.TextSearchService>(sp =>
+    new Mneme.Search.TextSearchService(sp.GetRequiredService<SqliteConnectionFactory>()));
+builder.Services.AddSingleton<IIngestObserver>(sp =>
+    new Mneme.Projections.ProjectorIngestObserver(sp.GetRequiredService<Mneme.Projections.ProjectorPipeline>()));
+builder.Services.AddSingleton<IIngestObserver>(sp =>
+    new Mneme.Search.TextSearchIngestObserver(sp.GetRequiredService<Mneme.Search.TextSearchService>()));
 builder.Services.AddSingleton<IMemoryAgent>(sp => new MemoryAgent(
     sp.GetRequiredService<SqliteConnectionFactory>(),
     sp.GetRequiredService<IRedactor>(),
     sp.GetRequiredService<IContentShapeSelector>(),
     sp.GetRequiredService<Mneme.Classification.IClassifier>(),
-    sp.GetRequiredService<TimeProvider>()));
+    sp.GetRequiredService<TimeProvider>(),
+    sp.GetServices<IIngestObserver>()));
 builder.Services.AddSingleton<Mneme.Revocation.IRevocationService>(sp =>
     new Mneme.Revocation.SqliteRevocationService(
         sp.GetRequiredService<SqliteConnectionFactory>(),

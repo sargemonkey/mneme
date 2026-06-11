@@ -37,31 +37,46 @@ public sealed class MemoryAgent : IMemoryAgent
     private readonly IContentShapeSelector _shapeSelector;
     private readonly Classification.IClassifier _classifier;
     private readonly TimeProvider _clock;
+    private readonly IReadOnlyList<IIngestObserver> _observers;
 
-    /// <summary>Construct against the storage layer with default helpers.</summary>
+    /// <summary>Construct against the storage layer with default helpers and no observers.</summary>
     public MemoryAgent(SqliteConnectionFactory connections)
         : this(connections, new RegexRedactor(), new AlwaysRedactedContent(),
-               new Classification.RuleBasedClassifier(), TimeProvider.System)
+               new Classification.RuleBasedClassifier(), TimeProvider.System,
+               Array.Empty<IIngestObserver>())
     { }
 
-    /// <summary>Construct against the storage layer with custom helpers (used by tests / DI).</summary>
+    /// <summary>Construct with custom helpers, no observers (used by tests + Phase 1 invariant).</summary>
     public MemoryAgent(
         SqliteConnectionFactory connections,
         IRedactor redactor,
         IContentShapeSelector shapeSelector,
         Classification.IClassifier classifier,
         TimeProvider clock)
+        : this(connections, redactor, shapeSelector, classifier, clock, Array.Empty<IIngestObserver>())
+    { }
+
+    /// <summary>Construct with full customisation including post-commit observers.</summary>
+    public MemoryAgent(
+        SqliteConnectionFactory connections,
+        IRedactor redactor,
+        IContentShapeSelector shapeSelector,
+        Classification.IClassifier classifier,
+        TimeProvider clock,
+        IEnumerable<IIngestObserver> observers)
     {
         ArgumentNullException.ThrowIfNull(connections);
         ArgumentNullException.ThrowIfNull(redactor);
         ArgumentNullException.ThrowIfNull(shapeSelector);
         ArgumentNullException.ThrowIfNull(classifier);
         ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(observers);
         _connections = connections;
         _redactor = redactor;
         _shapeSelector = shapeSelector;
         _classifier = classifier;
         _clock = clock;
+        _observers = observers.ToArray();
     }
 
     /// <inheritdoc/>
@@ -125,6 +140,28 @@ public sealed class MemoryAgent : IMemoryAgent
 
         var wasDuplicate = Persist(record);
         activity?.SetTag("mneme.ingest.duplicate", wasDuplicate);
+
+        if (!wasDuplicate && _observers.Count > 0)
+        {
+            var envelope = new Mneme.Projections.EventEnvelope(
+                EventId: record.EventId,
+                WorkstreamId: record.WorkstreamId,
+                Channel: record.Channel,
+                Category: record.Category,
+                SchemaVersion: record.SchemaVersion,
+                ValidAt: record.ValidAt,
+                InvalidAt: record.InvalidAt,
+                CreatedAt: record.CreatedAt,
+                ExpiredAt: record.ExpiredAt,
+                Classification: record.Classification,
+                RevokedAt: null,
+                Payload: redactedPayload,
+                Provenance: evt.Provenance);
+            foreach (var observer in _observers)
+            {
+                observer.OnIngested(envelope);
+            }
+        }
 
         return new IngestResult(evt.EventId, nowUtc, wasDuplicate);
     }

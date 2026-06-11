@@ -5,7 +5,9 @@ using Mneme.Contracts;
 using Mneme.Ingest;
 using Mneme.Ingest.Redaction;
 using Mneme.Ingest.Validation;
+using Mneme.Projections;
 using Mneme.Revocation;
+using Mneme.Search;
 using Mneme.Storage;
 
 namespace Mneme.Hosting;
@@ -74,12 +76,21 @@ public static class MnemeServiceCollectionExtensions
         services.TryAddSingleton<IContentShapeSelector, AlwaysRedactedContent>();
         services.TryAddSingleton<IClassifier, RuleBasedClassifier>();
         services.TryAddSingleton<TimeProvider>(TimeProvider.System);
+        services.TryAddSingleton<ProjectorPipeline>(sp => new ProjectorPipeline(
+            sp.GetRequiredService<SqliteConnectionFactory>()));
+        services.TryAddSingleton<TextSearchService>(sp => new TextSearchService(
+            sp.GetRequiredService<SqliteConnectionFactory>()));
+        services.AddSingleton<IIngestObserver>(sp => new ProjectorIngestObserver(
+            sp.GetRequiredService<ProjectorPipeline>()));
+        services.AddSingleton<IIngestObserver>(sp => new TextSearchIngestObserver(
+            sp.GetRequiredService<TextSearchService>()));
         services.TryAddSingleton<IMemoryAgent>(sp => new MemoryAgent(
             sp.GetRequiredService<SqliteConnectionFactory>(),
             sp.GetRequiredService<IRedactor>(),
             sp.GetRequiredService<IContentShapeSelector>(),
             sp.GetRequiredService<IClassifier>(),
-            sp.GetRequiredService<TimeProvider>()));
+            sp.GetRequiredService<TimeProvider>(),
+            sp.GetServices<IIngestObserver>()));
         services.TryAddSingleton<IRevocationService>(sp => new SqliteRevocationService(
             sp.GetRequiredService<SqliteConnectionFactory>(),
             sp.GetRequiredService<TimeProvider>()));

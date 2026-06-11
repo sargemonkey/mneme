@@ -1,0 +1,117 @@
+@page "/projections"
+@page "/projections/{Table}"
+@rendermode InteractiveServer
+@inject StudioReadService Read
+
+<PageTitle>Projections — Mneme.Studio</PageTitle>
+
+<h1>Projections</h1>
+<p class="text-muted">
+    Current-state read-models derived from the append-only event log.
+    Replayable from genesis via <code>ProjectorPipeline.RebuildAll()</code>.
+</p>
+
+<ul class="nav nav-tabs">
+    @foreach (var t in _tables)
+    {
+        <li class="nav-item">
+            <a class="nav-link @(t.Table == _selected ? "active" : null)" href="projections/@t.Table">@t.Label</a>
+        </li>
+    }
+</ul>
+
+<div class="row g-2 my-3 align-items-end">
+    <div class="col-md-4">
+        <label class="form-label">Workstream</label>
+        <select class="form-select" @bind="_workstream" @bind:after="Reload">
+            <option value="">(all)</option>
+            @foreach (var w in _workstreams)
+            {
+                <option value="@w">@w</option>
+            }
+        </select>
+    </div>
+    <div class="col-md-2">
+        <label class="form-label">Limit</label>
+        <select class="form-select" @bind="_limit" @bind:after="Reload">
+            <option value="25">25</option>
+            <option value="100">100</option>
+        </select>
+    </div>
+    <div class="col-md-2">
+        <button class="btn btn-secondary" @onclick="Reload">Refresh</button>
+    </div>
+</div>
+
+@if (_rows is null)
+{
+    <p><em>Loading…</em></p>
+}
+else if (_rows.Count == 0)
+{
+    <p class="text-muted">No rows in this projection yet.</p>
+}
+else
+{
+    <table class="table table-striped table-sm align-middle">
+        <thead>
+            <tr>
+                <th>workstream</th>
+                <th>statement</th>
+                <th>@_secondaryHeader</th>
+                @if (_selected == "projection_decisions") { <th>approver</th> }
+                <th>classification</th>
+                <th>valid_at</th>
+                <th>event_id</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var r in _rows)
+            {
+                <tr class="@(r.IsRevoked ? "text-muted text-decoration-line-through" : null)">
+                    <td>@r.WorkstreamId</td>
+                    <td>@r.Statement</td>
+                    <td>@r.SecondaryField</td>
+                    @if (_selected == "projection_decisions") { <td>@r.Approver</td> }
+                    <td>@r.Classification</td>
+                    <td><code>@r.ValidAt.ToString("u")</code></td>
+                    <td><code>@r.EventId</code></td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    [Parameter] public string? Table { get; set; }
+
+    private readonly record struct ProjectionTable(string Table, string Label, string Secondary);
+    private readonly ProjectionTable[] _tables =
+    {
+        new("projection_facts",       "Facts",      ""),
+        new("projection_decisions",   "Decisions",  "rationale"),
+        new("projection_goals",       "Goals",      "state"),
+        new("projection_hypotheses",  "Hypotheses", "state"),
+    };
+
+    private string _selected = "projection_facts";
+    private string _secondaryHeader = "";
+    private string _workstream = "";
+    private int _limit = 25;
+    private IReadOnlyList<string> _workstreams = Array.Empty<string>();
+    private IReadOnlyList<ProjectionRow>? _rows;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _selected = _tables.Any(t => t.Table == Table) ? Table! : "projection_facts";
+        _secondaryHeader = _tables.First(t => t.Table == _selected).Secondary;
+        await Reload();
+    }
+
+    private async Task Reload()
+    {
+        _workstreams = await Read.WorkstreamsAsync();
+        _rows = await Read.ProjectionRowsAsync(_selected,
+            string.IsNullOrEmpty(_workstream) ? null : _workstream, _limit);
+    }
+}

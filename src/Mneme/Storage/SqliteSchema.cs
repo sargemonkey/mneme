@@ -27,7 +27,7 @@ namespace Mneme.Storage;
 public static class SqliteSchema
 {
     /// <summary>Current schema version. Bumped when the DDL changes incompatibly.</summary>
-    public const int Version = 2;
+    public const int Version = 3;
 
     /// <summary>
     /// Idempotently create all Phase 1 tables, indexes, and the
@@ -190,5 +190,108 @@ public static class SqliteSchema
 
         CREATE INDEX IF NOT EXISTS idx_memory_revocations_workstream
             ON memory_revocations(workstream_id, revoked_at);
+
+        -- Phase 3 — projections. Read-models derived from memory_events.
+        -- Rebuildable from scratch by replaying the log; updated
+        -- incrementally by the projector worker. Each projection has its
+        -- own (workstream_id, event_id) primary key so a single event
+        -- produces at most one row per projection.
+
+        CREATE TABLE IF NOT EXISTS projection_facts (
+            workstream_id   TEXT NOT NULL,
+            event_id        TEXT NOT NULL,
+            statement       TEXT NOT NULL,
+            supporting_events_json TEXT NOT NULL,
+            classification  INTEGER NOT NULL DEFAULT 0,
+            valid_at        TEXT NOT NULL,
+            invalid_at      TEXT,
+            created_at      TEXT NOT NULL,
+            expired_at      TEXT,
+            revoked_at      TEXT,
+            PRIMARY KEY (workstream_id, event_id),
+            FOREIGN KEY (event_id) REFERENCES memory_events(event_id)
+        ) WITHOUT ROWID;
+        CREATE INDEX IF NOT EXISTS idx_projection_facts_valid
+            ON projection_facts(workstream_id, valid_at);
+
+        CREATE TABLE IF NOT EXISTS projection_decisions (
+            workstream_id   TEXT NOT NULL,
+            event_id        TEXT NOT NULL,
+            statement       TEXT NOT NULL,
+            rationale       TEXT NOT NULL,
+            approver        TEXT NOT NULL,
+            supporting_events_json TEXT NOT NULL,
+            classification  INTEGER NOT NULL DEFAULT 0,
+            valid_at        TEXT NOT NULL,
+            invalid_at      TEXT,
+            created_at      TEXT NOT NULL,
+            expired_at      TEXT,
+            revoked_at      TEXT,
+            PRIMARY KEY (workstream_id, event_id),
+            FOREIGN KEY (event_id) REFERENCES memory_events(event_id)
+        ) WITHOUT ROWID;
+        CREATE INDEX IF NOT EXISTS idx_projection_decisions_valid
+            ON projection_decisions(workstream_id, valid_at);
+
+        CREATE TABLE IF NOT EXISTS projection_goals (
+            workstream_id   TEXT NOT NULL,
+            event_id        TEXT NOT NULL,
+            statement       TEXT NOT NULL,
+            state           INTEGER NOT NULL,
+            classification  INTEGER NOT NULL DEFAULT 0,
+            valid_at        TEXT NOT NULL,
+            invalid_at      TEXT,
+            created_at      TEXT NOT NULL,
+            expired_at      TEXT,
+            revoked_at      TEXT,
+            PRIMARY KEY (workstream_id, event_id),
+            FOREIGN KEY (event_id) REFERENCES memory_events(event_id)
+        ) WITHOUT ROWID;
+        CREATE INDEX IF NOT EXISTS idx_projection_goals_state
+            ON projection_goals(workstream_id, state);
+
+        CREATE TABLE IF NOT EXISTS projection_hypotheses (
+            workstream_id   TEXT NOT NULL,
+            event_id        TEXT NOT NULL,
+            statement       TEXT NOT NULL,
+            state           INTEGER NOT NULL,
+            classification  INTEGER NOT NULL DEFAULT 0,
+            valid_at        TEXT NOT NULL,
+            invalid_at      TEXT,
+            created_at      TEXT NOT NULL,
+            expired_at      TEXT,
+            revoked_at      TEXT,
+            PRIMARY KEY (workstream_id, event_id),
+            FOREIGN KEY (event_id) REFERENCES memory_events(event_id)
+        ) WITHOUT ROWID;
+        CREATE INDEX IF NOT EXISTS idx_projection_hypotheses_state
+            ON projection_hypotheses(workstream_id, state);
+
+        -- Per-projection processing log. Lets a single projection be
+        -- replayed in isolation without rebuilding everything else.
+        -- Pattern from Cognee — see research-design-lessons.md §3.3.
+        CREATE TABLE IF NOT EXISTS event_processing_log (
+            event_id        TEXT NOT NULL,
+            projection_name TEXT NOT NULL,
+            status          INTEGER NOT NULL,
+            processed_at    TEXT NOT NULL,
+            error           TEXT,
+            PRIMARY KEY (event_id, projection_name),
+            FOREIGN KEY (event_id) REFERENCES memory_events(event_id)
+        ) WITHOUT ROWID;
+        CREATE INDEX IF NOT EXISTS idx_event_processing_log_projection
+            ON event_processing_log(projection_name, status, processed_at);
+
+        -- FTS5 text index over redacted free-text content. Workstream
+        -- and category live in non-indexed UNINDEXED columns so they
+        -- can be used as MATCH-side equality filters cheaply.
+        CREATE VIRTUAL TABLE IF NOT EXISTS event_text_index USING fts5(
+            content,
+            workstream_id UNINDEXED,
+            event_id      UNINDEXED,
+            category      UNINDEXED,
+            created_at    UNINDEXED,
+            tokenize      = 'unicode61 remove_diacritics 2'
+        );
         """;
 }

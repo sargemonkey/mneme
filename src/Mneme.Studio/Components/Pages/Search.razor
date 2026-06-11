@@ -1,0 +1,116 @@
+@page "/search"
+@rendermode InteractiveServer
+@using Mneme.Search
+@inject TextSearchService SearchSvc
+@inject StudioReadService Read
+
+<PageTitle>Search — Mneme.Studio</PageTitle>
+
+<h1>Search</h1>
+<p class="text-muted">
+    Workstream-scoped FTS5 search with adaptive-BM25 + recency weighting.
+    Each event's redacted content is indexed at ingest by the
+    <code>TextSearchIngestObserver</code>.
+</p>
+
+<EditForm Model="this" OnValidSubmit="Run" FormName="search">
+    <div class="row g-2 my-3 align-items-end">
+        <div class="col-md-3">
+            <label class="form-label">Workstream</label>
+            <select class="form-select" @bind="_workstream">
+                @foreach (var w in _workstreams)
+                {
+                    <option value="@w">@w</option>
+                }
+            </select>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">Query (FTS5 syntax)</label>
+            <InputText class="form-control" @bind-Value="_query" />
+        </div>
+        <div class="col-md-2">
+            <label class="form-label">Limit</label>
+            <select class="form-select" @bind="_limit">
+                <option value="10">10</option>
+                <option value="25">25</option>
+                <option value="50">50</option>
+            </select>
+        </div>
+        <div class="col-md-1">
+            <button class="btn btn-primary w-100" type="submit">Run</button>
+        </div>
+    </div>
+</EditForm>
+
+@if (_error is not null)
+{
+    <div class="alert alert-danger">@_error</div>
+}
+
+@if (_hits is not null)
+{
+    <p class="text-muted small">
+        @_hits.Count hit(s). Query token count: @Mneme.Search.AdaptiveBm25.CountTokens(_query)
+        (k=@($"{Mneme.Search.AdaptiveBm25.Parameters(Mneme.Search.AdaptiveBm25.CountTokens(_query)).K}"),
+        x0=@($"{Mneme.Search.AdaptiveBm25.Parameters(Mneme.Search.AdaptiveBm25.CountTokens(_query)).X0}")).
+    </p>
+    <table class="table table-sm">
+        <thead>
+            <tr>
+                <th>event_id</th>
+                <th>category</th>
+                <th>created_at</th>
+                <th class="text-end">raw bm25</th>
+                <th class="text-end">norm bm25</th>
+                <th class="text-end">recency</th>
+                <th class="text-end">score</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var h in _hits)
+            {
+                <tr>
+                    <td><code>@h.EventId.Value</code></td>
+                    <td>@h.Category</td>
+                    <td><code>@h.CreatedAt.ToString("u")</code></td>
+                    <td class="text-end">@h.RawBm25.ToString("F3")</td>
+                    <td class="text-end">@h.NormalizedBm25.ToString("F3")</td>
+                    <td class="text-end">@h.RecencyWeight.ToString("F3")</td>
+                    <td class="text-end"><strong>@h.Score.ToString("F3")</strong></td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private string _workstream = "";
+    private string _query = "";
+    private int _limit = 25;
+    private IReadOnlyList<string> _workstreams = Array.Empty<string>();
+    private IReadOnlyList<SearchHit>? _hits;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _workstreams = await Read.WorkstreamsAsync();
+        if (_workstreams.Count > 0 && string.IsNullOrEmpty(_workstream))
+        {
+            _workstream = _workstreams[0];
+        }
+    }
+
+    private void Run()
+    {
+        _error = null;
+        try
+        {
+            _hits = SearchSvc.Search(_workstream, _query, _limit);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            _hits = null;
+        }
+    }
+}
