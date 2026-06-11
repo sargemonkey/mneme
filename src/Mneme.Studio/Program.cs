@@ -53,6 +53,12 @@ builder.Services.AddSingleton<IMemoryQueryAPI>(sp => new Mneme.Query.MemoryQuery
     sp.GetRequiredService<SqliteConnectionFactory>(),
     sp.GetRequiredService<Mneme.Search.TextSearchService>(),
     sp.GetRequiredService<TimeProvider>()));
+builder.Services.AddSingleton<IMemoryCurator>(sp => new Mneme.Curation.SqliteMemoryCurator(
+    sp.GetRequiredService<SqliteConnectionFactory>(),
+    sp.GetRequiredService<TimeProvider>()));
+builder.Services.AddSingleton<ICurationLog>(sp => new Mneme.Curation.SqliteCurationLog(
+    sp.GetRequiredService<SqliteConnectionFactory>(),
+    sp.GetRequiredService<TimeProvider>()));
 // Studio's default capability token: principal=studio-user, scoped to
 // every workstream visible to Studio. Cross-workstream so the Query
 // page works against whatever the user picks.

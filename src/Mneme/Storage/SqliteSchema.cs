@@ -27,7 +27,7 @@ namespace Mneme.Storage;
 public static class SqliteSchema
 {
     /// <summary>Current schema version. Bumped when the DDL changes incompatibly.</summary>
-    public const int Version = 3;
+    public const int Version = 4;
 
     /// <summary>
     /// Idempotently create all Phase 1 tables, indexes, and the
@@ -293,5 +293,29 @@ public static class SqliteSchema
             created_at    UNINDEXED,
             tokenize      = 'unicode61 remove_diacritics 2'
         );
+
+        -- Phase 7.5 — HITL curation. Curation events are append-only
+        -- (a revert is itself a new curation event whose target_event_id
+        -- points at the curation being reversed). curated_target is the
+        -- epistemic event being mutated; reverted_by is set when this
+        -- curation is later undone.
+        CREATE TABLE IF NOT EXISTS curation_events (
+            event_id          TEXT NOT NULL PRIMARY KEY,
+            target_event_id   TEXT NOT NULL,
+            workstream_id     TEXT NOT NULL,
+            curation_type     INTEGER NOT NULL,
+            curator           TEXT NOT NULL,
+            rationale         TEXT NOT NULL,
+            occurred_at       TEXT NOT NULL,
+            pre_state_hash    TEXT NOT NULL,
+            payload_json      TEXT NOT NULL,
+            reverted_by       TEXT
+        ) WITHOUT ROWID;
+        CREATE INDEX IF NOT EXISTS idx_curation_events_target
+            ON curation_events(target_event_id, occurred_at);
+        CREATE INDEX IF NOT EXISTS idx_curation_events_workstream
+            ON curation_events(workstream_id, occurred_at);
+        CREATE INDEX IF NOT EXISTS idx_curation_events_curator
+            ON curation_events(curator, occurred_at);
         """;
 }

@@ -1,0 +1,263 @@
+@page "/curation"
+@rendermode InteractiveServer
+@using Mneme.Contracts
+@using Mneme.Curation
+@inject IMemoryCurator Curator
+@inject ICurationLog Log
+@inject CapabilityToken Token
+@inject StudioReadService Read
+@inject Mneme.Storage.SqliteConnectionFactory Factory
+
+<PageTitle>Curation — Mneme.Studio</PageTitle>
+
+<h1>Curation</h1>
+<p class="text-muted">
+    Phase 7.5 HITL curation. Every operation appends a row to
+    <code>curation_events</code>; <code>memory_events</code> stays
+    untouched (append-only). Amend / split / merge are guarded by a
+    pre-state hash (Letta <code>core_memory_replace</code> pattern).
+</p>
+
+<div class="row g-2 my-3 align-items-end">
+    <div class="col-md-4">
+        <label class="form-label">Workstream</label>
+        <select class="form-select" @bind="_workstream" @bind:after="Reload">
+            @foreach (var w in _workstreams)
+            {
+                <option value="@w">@w</option>
+            }
+        </select>
+    </div>
+    <div class="col-md-2">
+        <button class="btn btn-secondary" @onclick="Reload">Refresh</button>
+    </div>
+</div>
+
+<h3>Events (curate any row)</h3>
+@if (_events is null)
+{
+    <p><em>Loading…</em></p>
+}
+else if (_events.Count == 0)
+{
+    <p class="text-muted">No events for this workstream — head to <a href="ingest">Ingest</a> first.</p>
+}
+else
+{
+    <table class="table table-sm align-middle">
+        <thead><tr><th>event_id</th><th>category</th><th>summary</th><th>actions</th></tr></thead>
+        <tbody>
+            @foreach (var e in _events)
+            {
+                <tr>
+                    <td><code>@e.EventId</code></td>
+                    <td>@e.Category</td>
+                    <td>@PayloadSummary(e.PayloadJson)</td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="() => Open(e, CurationAction.Annotate)">Annotate</button>
+                        <button class="btn btn-sm btn-outline-success" @onclick="() => Open(e, CurationAction.Pin)">Pin</button>
+                        <button class="btn btn-sm btn-outline-warning" @onclick="() => Open(e, CurationAction.Demote)">Demote</button>
+                        <button class="btn btn-sm btn-outline-primary" @onclick="() => Open(e, CurationAction.Amend)">Amend</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+<h3 class="mt-4">Curation log</h3>
+@if (_history is null)
+{
+    <p><em>Loading…</em></p>
+}
+else if (_history.Count == 0)
+{
+    <p class="text-muted">No curations yet.</p>
+}
+else
+{
+    <table class="table table-sm align-middle">
+        <thead><tr><th>occurred_at</th><th>curator</th><th>type</th><th>target</th><th>rationale</th><th></th></tr></thead>
+        <tbody>
+            @foreach (var h in _history)
+            {
+                <tr>
+                    <td><code>@h.OccurredAt.ToString("u")</code></td>
+                    <td>@h.Curator.Value</td>
+                    <td>@h.Type</td>
+                    <td><code>@h.TargetEventId.Value</code></td>
+                    <td>@h.Rationale</td>
+                    <td>
+                        @if (h.Type != CurationType.Reverted && !_revertedIds.Contains(h.CurationEventId.Value))
+                        {
+                            <button class="btn btn-sm btn-outline-danger" @onclick="() => Revert(h)">Revert…</button>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@if (_modal is not null)
+{
+    <div class="modal d-block bg-dark bg-opacity-50" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@_modal.Title</h5>
+                    <button class="btn-close" @onclick="Cancel"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small">Target: <code>@_modal.Target.EventId</code></p>
+                    @if (_modal.Action == CurationAction.Amend)
+                    {
+                        <label class="form-label">New content</label>
+                        <textarea class="form-control mb-2" rows="3" @bind="_modalContent"></textarea>
+                    }
+                    @if (_modal.Action is CurationAction.Pin or CurationAction.Demote)
+                    {
+                        <label class="form-label">Multiplier (@(_modal.Action == CurationAction.Pin ? ">1.0" : "0.0..1.0"))</label>
+                        <input class="form-control mb-2" type="number" step="0.1" @bind="_modalMultiplier" />
+                    }
+                    <label class="form-label">@(_modal.Action == CurationAction.Annotate ? "Annotation" : "Rationale")</label>
+                    <input class="form-control" @bind="_modalRationale" />
+                    @if (_error is not null) { <div class="alert alert-danger mt-2 mb-0">@_error</div> }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="Cancel">Cancel</button>
+                    <button class="btn btn-primary" @onclick="Submit">Apply</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private string _workstream = "";
+    private IReadOnlyList<string> _workstreams = Array.Empty<string>();
+    private IReadOnlyList<EventRow>? _events;
+    private IReadOnlyList<CurationEntry>? _history;
+    private readonly HashSet<string> _revertedIds = new();
+
+    private record ModalState(CurationAction Action, EventRow Target, string Title);
+    private ModalState? _modal;
+    private string _modalContent = "";
+    private string _modalRationale = "";
+    private float _modalMultiplier;
+    private string? _error;
+
+    private enum CurationAction { Annotate, Pin, Demote, Amend }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _workstreams = await Read.WorkstreamsAsync();
+        if (_workstreams.Count > 0) _workstream = _workstreams[0];
+        await Reload();
+    }
+
+    private async Task Reload()
+    {
+        if (string.IsNullOrEmpty(_workstream))
+        {
+            _events = Array.Empty<EventRow>();
+            _history = Array.Empty<CurationEntry>();
+            return;
+        }
+        _events = await Read.RecentEventsAsync(_workstream, 50);
+        _history = await Log.GetCurationHistoryAsync(new WorkstreamId(_workstream),
+            DateTimeOffset.UtcNow.AddYears(-1), Token);
+        _revertedIds.Clear();
+        using var c = Factory.Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT event_id FROM curation_events WHERE workstream_id = $ws AND reverted_by IS NOT NULL;";
+        cmd.Parameters.AddWithValue("$ws", _workstream);
+        using var r = cmd.ExecuteReader();
+        while (r.Read()) _revertedIds.Add(r.GetString(0));
+    }
+
+    private void Open(EventRow target, CurationAction action)
+    {
+        _modal = new ModalState(action, target, action.ToString());
+        _modalContent = "";
+        _modalRationale = "";
+        _modalMultiplier = action == CurationAction.Pin ? 2.0f : 0.3f;
+        _error = null;
+    }
+
+    private void Cancel() { _modal = null; _error = null; }
+
+    private async Task Submit()
+    {
+        if (_modal is null) return;
+        try
+        {
+            _error = null;
+            var cap = StudioCurationCapability();
+            var target = new EventId(_modal.Target.EventId);
+            switch (_modal.Action)
+            {
+                case CurationAction.Annotate:
+                    await Curator.AnnotateAsync(target, _modalRationale, cap);
+                    break;
+                case CurationAction.Pin:
+                    await Curator.PinAsync(target, PinScope.Workstream, _modalMultiplier, cap);
+                    break;
+                case CurationAction.Demote:
+                    await Curator.DemoteAsync(target, _modalMultiplier, cap);
+                    break;
+                case CurationAction.Amend:
+                    var hash = PreStateHasher.ComputeHash(Factory, target);
+                    await Curator.AmendFactAsync(new FactId(target.Value), hash,
+                        new FactAmendment(_modalContent, _modalRationale), cap);
+                    break;
+            }
+            _modal = null;
+            await Reload();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private async Task Revert(CurationEntry e)
+    {
+        try
+        {
+            await Curator.RevertCurationAsync(e.CurationEventId, "reverted via Studio", StudioCurationCapability());
+            await Reload();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private CurationCapability StudioCurationCapability() => new(
+        Principal: new PrincipalId("studio-user"),
+        Workstream: new WorkstreamId(_workstream),
+        NotBefore: DateTimeOffset.UtcNow.AddMinutes(-5),
+        NotAfter: DateTimeOffset.UtcNow.AddHours(1),
+        CanAmend: true, CanAnnotate: true, CanPin: true, CanDemote: true,
+        CanSplit: true, CanMerge: true, CanRevert: true, CanReview: true);
+
+    private static string PayloadSummary(string json)
+    {
+        if (string.IsNullOrEmpty(json)) return "";
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            foreach (var field in new[] { "content", "statement" })
+            {
+                if (doc.RootElement.TryGetProperty(field, out var v))
+                {
+                    var s = v.GetString() ?? "";
+                    return s.Length > 120 ? s[..120] + "…" : s;
+                }
+            }
+        }
+        catch { }
+        return json.Length > 120 ? json[..120] + "…" : json;
+    }
+}

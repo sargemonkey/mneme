@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Mneme.Classification;
 using Mneme.Contracts;
+using Mneme.Curation;
 using Mneme.Ingest;
 using Mneme.Ingest.Redaction;
 using Mneme.Ingest.Validation;
@@ -98,6 +99,12 @@ public static class MnemeServiceCollectionExtensions
         services.TryAddSingleton<IMemoryQueryAPI>(sp => new MemoryQueryApi(
             sp.GetRequiredService<SqliteConnectionFactory>(),
             sp.GetRequiredService<TextSearchService>(),
+            sp.GetRequiredService<TimeProvider>()));
+        services.TryAddSingleton<IMemoryCurator>(sp => new SqliteMemoryCurator(
+            sp.GetRequiredService<SqliteConnectionFactory>(),
+            sp.GetRequiredService<TimeProvider>()));
+        services.TryAddSingleton<ICurationLog>(sp => new SqliteCurationLog(
+            sp.GetRequiredService<SqliteConnectionFactory>(),
             sp.GetRequiredService<TimeProvider>()));
 
         var permitted = opts.PermittedCategories?.ToArray()
