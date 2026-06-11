@@ -1,6 +1,8 @@
 @page "/events"
 @rendermode InteractiveServer
+@using Mneme.Revocation
 @inject StudioReadService Read
+@inject IRevocationService Revocation
 
 <PageTitle>Event log — Mneme.Studio</PageTitle>
 
@@ -8,6 +10,7 @@
 <p class="text-muted">
     The append-only <code>memory_events</code> table, newest first.
     Filter by workstream. Click a row to expand the redacted payload.
+    Revoked rows are struck through; payload metadata stays intact.
 </p>
 
 <div class="row g-2 my-3 align-items-end">
@@ -44,32 +47,47 @@ else if (_rows.Count == 0)
 }
 else
 {
-    <table class="table table-striped table-sm">
+    <table class="table table-striped table-sm align-middle">
         <thead>
             <tr>
                 <th>created_at (UTC)</th>
                 <th>workstream</th>
                 <th>channel</th>
                 <th>category</th>
+                <th>classification</th>
                 <th>event_id</th>
-                <th>valid_at</th>
+                <th>actions</th>
             </tr>
         </thead>
         <tbody>
             @foreach (var r in _rows)
             {
-                <tr class="@(_expanded == r.EventId ? "table-active" : null)" @onclick="() => Toggle(r.EventId)" style="cursor:pointer">
-                    <td><code>@r.CreatedAt.ToString("u")</code></td>
-                    <td>@r.WorkstreamId</td>
-                    <td>@r.Channel</td>
-                    <td>@r.Category</td>
-                    <td><code>@r.EventId</code></td>
-                    <td><code>@r.ValidAt.ToString("u")</code></td>
+                <tr class="@(_expanded == r.EventId ? "table-active" : null)">
+                    <td @onclick="() => Toggle(r.EventId)" style="cursor:pointer"><code>@r.CreatedAt.ToString("u")</code></td>
+                    <td @onclick="() => Toggle(r.EventId)" style="cursor:pointer">@r.WorkstreamId</td>
+                    <td @onclick="() => Toggle(r.EventId)" style="cursor:pointer">@r.Channel</td>
+                    <td @onclick="() => Toggle(r.EventId)" style="cursor:pointer">@r.Category</td>
+                    <td @onclick="() => Toggle(r.EventId)" style="cursor:pointer">
+                        <span class="badge @ClassBadge(r.Classification)">@r.Classification</span>
+                    </td>
+                    <td @onclick="() => Toggle(r.EventId)" style="cursor:pointer">
+                        @if (r.IsRevoked) { <s><code>@r.EventId</code></s> } else { <code>@r.EventId</code> }
+                    </td>
+                    <td>
+                        @if (!r.IsRevoked)
+                        {
+                            <button class="btn btn-sm btn-outline-danger" @onclick="() => Revoke(r)">Revoke…</button>
+                        }
+                        else
+                        {
+                            <span class="text-muted">revoked</span>
+                        }
+                    </td>
                 </tr>
                 @if (_expanded == r.EventId)
                 {
                     <tr>
-                        <td colspan="6">
+                        <td colspan="7">
                             <pre class="bg-light p-2 mb-0" style="white-space:pre-wrap">@r.PayloadJson</pre>
                         </td>
                     </tr>
@@ -79,12 +97,52 @@ else
     </table>
 }
 
+@if (_revokeTarget is not null)
+{
+    <div class="modal d-block bg-dark bg-opacity-50" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Revoke event</h5>
+                    <button class="btn-close" @onclick="CancelRevoke"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Revoking <code>@_revokeTarget.EventId</code> in workstream
+                       <code>@_revokeTarget.WorkstreamId</code>.</p>
+                    <p class="text-muted small">
+                        The <code>memory_events</code> row stays intact. A row is
+                        appended to <code>memory_revocations</code> capturing who, when,
+                        and why; if there was an associated artifact body it is zeroed.
+                    </p>
+                    <label class="form-label">Principal</label>
+                    <input class="form-control mb-2" @bind="_revokePrincipal" />
+                    <label class="form-label">Reason</label>
+                    <input class="form-control" @bind="_revokeReason" />
+                    @if (!string.IsNullOrEmpty(_revokeError))
+                    {
+                        <div class="alert alert-danger mt-2 mb-0">@_revokeError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CancelRevoke">Cancel</button>
+                    <button class="btn btn-danger" @onclick="ConfirmRevoke">Revoke</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     private IReadOnlyList<EventRow>? _rows;
     private IReadOnlyList<string> _workstreams = Array.Empty<string>();
     private string _workstream = "";
     private int _limit = 25;
     private string? _expanded;
+
+    private EventRow? _revokeTarget;
+    private string _revokePrincipal = "studio-user";
+    private string _revokeReason = "";
+    private string? _revokeError;
 
     protected override async Task OnInitializedAsync() => await Reload();
 
@@ -95,4 +153,43 @@ else
     }
 
     private void Toggle(string id) => _expanded = _expanded == id ? null : id;
+
+    private void Revoke(EventRow r)
+    {
+        _revokeTarget = r;
+        _revokeReason = "";
+        _revokeError = null;
+    }
+
+    private void CancelRevoke() => _revokeTarget = null;
+
+    private async Task ConfirmRevoke()
+    {
+        if (_revokeTarget is null) return;
+        try
+        {
+            _revokeError = null;
+            await Revocation.RevokeAsync(
+                new Mneme.Contracts.EventId(_revokeTarget.EventId),
+                new Mneme.Contracts.WorkstreamId(_revokeTarget.WorkstreamId),
+                new Mneme.Contracts.PrincipalId(_revokePrincipal),
+                _revokeReason);
+            _revokeTarget = null;
+            await Reload();
+        }
+        catch (Exception ex)
+        {
+            _revokeError = ex.Message;
+        }
+    }
+
+    private static string ClassBadge(Mneme.Contracts.Classification c) => c switch
+    {
+        Mneme.Contracts.Classification.Public       => "bg-success",
+        Mneme.Contracts.Classification.Internal     => "bg-secondary",
+        Mneme.Contracts.Classification.Confidential => "bg-warning text-dark",
+        Mneme.Contracts.Classification.Secret       => "bg-danger",
+        Mneme.Contracts.Classification.Pii          => "bg-info text-dark",
+        _ => "bg-light text-dark",
+    };
 }

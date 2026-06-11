@@ -35,32 +35,37 @@ public sealed class MemoryAgent : IMemoryAgent
     private readonly SqliteConnectionFactory _connections;
     private readonly IRedactor _redactor;
     private readonly IContentShapeSelector _shapeSelector;
+    private readonly Classification.IClassifier _classifier;
     private readonly TimeProvider _clock;
 
-    /// <summary>Construct against the storage layer with default rules.</summary>
+    /// <summary>Construct against the storage layer with default helpers.</summary>
     public MemoryAgent(SqliteConnectionFactory connections)
-        : this(connections, new RegexRedactor(), new AlwaysRedactedContent(), TimeProvider.System)
+        : this(connections, new RegexRedactor(), new AlwaysRedactedContent(),
+               new Classification.RuleBasedClassifier(), TimeProvider.System)
     { }
 
-    /// <summary>Construct against the storage layer with custom helpers (used by tests).</summary>
+    /// <summary>Construct against the storage layer with custom helpers (used by tests / DI).</summary>
     public MemoryAgent(
         SqliteConnectionFactory connections,
         IRedactor redactor,
         IContentShapeSelector shapeSelector,
+        Classification.IClassifier classifier,
         TimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(connections);
         ArgumentNullException.ThrowIfNull(redactor);
         ArgumentNullException.ThrowIfNull(shapeSelector);
+        ArgumentNullException.ThrowIfNull(classifier);
         ArgumentNullException.ThrowIfNull(clock);
         _connections = connections;
         _redactor = redactor;
         _shapeSelector = shapeSelector;
+        _classifier = classifier;
         _clock = clock;
     }
 
     /// <inheritdoc/>
-    public Task<IngestResult> IngestAsync(CaptureEvent evt, CancellationToken ct = default)
+    public async Task<IngestResult> IngestAsync(CaptureEvent evt, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(evt);
         ct.ThrowIfCancellationRequested();
@@ -87,12 +92,16 @@ public sealed class MemoryAgent : IMemoryAgent
         }
         activity?.SetTag("mneme.redactor.had_hits", hadHits);
 
-        // Classification is a Phase 2 stub: label = category for now.
+        Mneme.Contracts.Classification label;
         using (var classifySpan = MnemeActivitySource.Source.StartActivity(
             MnemeActivitySource.ClassifyRun, ActivityKind.Internal))
         {
-            classifySpan?.SetTag("mneme.classify.label", redactedPayload.Category.ToString());
+            label = await _classifier.ClassifyAsync(
+                PayloadText(redactedPayload), hadHits, redactedPayload.Category, ct)
+                .ConfigureAwait(false);
+            classifySpan?.SetTag("mneme.classify.label", label.ToString());
         }
+        activity?.SetTag("mneme.classification", (int)label);
 
         var shape = _shapeSelector.Select(evt);
         activity?.SetTag("mneme.content_shape", (int)shape);
@@ -111,13 +120,26 @@ public sealed class MemoryAgent : IMemoryAgent
             PayloadJson: EventSerialization.SerializePayload(redactedPayload),
             ProvenanceJson: EventSerialization.SerializeProvenance(evt.Provenance),
             Shape: shape,
+            Classification: label,
             ArtifactId: null);
 
         var wasDuplicate = Persist(record);
         activity?.SetTag("mneme.ingest.duplicate", wasDuplicate);
 
-        return Task.FromResult(new IngestResult(evt.EventId, nowUtc, wasDuplicate));
+        return new IngestResult(evt.EventId, nowUtc, wasDuplicate);
     }
+
+    private static string PayloadText(EventPayload p) => p switch
+    {
+        EvidencePayload e   => e.Content,
+        FactPayload f       => f.Statement,
+        DecisionPayload d   => d.Statement + "\n" + d.Rationale,
+        HypothesisPayload h => h.Statement,
+        GoalPayload g       => g.Statement,
+        ActionPayload a     => a.Statement,
+        OutcomePayload o    => o.Statement,
+        _                   => string.Empty,
+    };
 
     private static void ValidateEnvelope(CaptureEvent evt)
     {
@@ -146,11 +168,11 @@ public sealed class MemoryAgent : IMemoryAgent
             INSERT INTO memory_events(
                 event_id, workstream_id, event_channel, category,
                 schema_version, valid_at, invalid_at, created_at, expired_at,
-                payload_json, provenance_json, content_shape, artifact_id)
+                payload_json, provenance_json, content_shape, classification, artifact_id)
             VALUES (
                 $eventId, $workstreamId, $channel, $category,
                 $schemaVersion, $validAt, $invalidAt, $createdAt, $expiredAt,
-                $payloadJson, $provenanceJson, $contentShape, $artifactId)
+                $payloadJson, $provenanceJson, $contentShape, $classification, $artifactId)
             ON CONFLICT(event_id) DO NOTHING;
             """;
         cmd.Parameters.AddWithValue("$eventId", r.EventId.Value);
@@ -167,6 +189,7 @@ public sealed class MemoryAgent : IMemoryAgent
         cmd.Parameters.AddWithValue("$payloadJson", r.PayloadJson);
         cmd.Parameters.AddWithValue("$provenanceJson", r.ProvenanceJson);
         cmd.Parameters.AddWithValue("$contentShape", (int)r.Shape);
+        cmd.Parameters.AddWithValue("$classification", (int)r.Classification);
         cmd.Parameters.AddWithValue("$artifactId", (object?)r.ArtifactId ?? DBNull.Value);
         var inserted = cmd.ExecuteNonQuery();
 
@@ -205,5 +228,6 @@ public sealed class MemoryAgent : IMemoryAgent
         string PayloadJson,
         string ProvenanceJson,
         ContentShape Shape,
+        Mneme.Contracts.Classification Classification,
         string? ArtifactId);
 }

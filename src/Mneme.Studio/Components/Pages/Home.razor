@@ -40,38 +40,54 @@ else
         <div class="col-md-3">
             <div class="card">
                 <div class="card-body">
-                    <h6 class="card-subtitle text-muted">Phase</h6>
-                    <div class="display-5">1</div>
-                    <small class="text-muted">Event log + ingest</small>
+                    <h6 class="card-subtitle text-muted">Revoked</h6>
+                    <div class="display-5">@_metrics.Revoked</div>
                 </div>
             </div>
         </div>
     </div>
 
-    <h3 class="mt-4">Events by category</h3>
-    <table class="table table-sm w-auto">
-        <thead><tr><th>Category</th><th class="text-end">Count</th></tr></thead>
-        <tbody>
-            @foreach (var kvp in _metrics.ByCategory.OrderByDescending(x => x.Value))
-            {
-                <tr>
-                    <td>@kvp.Key</td>
-                    <td class="text-end">@kvp.Value</td>
-                </tr>
-            }
-            @if (_metrics.ByCategory.Count == 0)
-            {
-                <tr><td colspan="2" class="text-muted">No events yet — head to <a href="ingest">Ingest</a>.</td></tr>
-            }
-        </tbody>
-    </table>
+    <div class="row g-3">
+        <div class="col-md-6">
+            <h3>Events by category</h3>
+            <table class="table table-sm w-auto">
+                <thead><tr><th>Category</th><th class="text-end">Count</th></tr></thead>
+                <tbody>
+                    @foreach (var kvp in _metrics.ByCategory.OrderByDescending(x => x.Value))
+                    {
+                        <tr><td>@kvp.Key</td><td class="text-end">@kvp.Value</td></tr>
+                    }
+                    @if (_metrics.ByCategory.Count == 0)
+                    {
+                        <tr><td colspan="2" class="text-muted">No events yet — head to <a href="ingest">Ingest</a>.</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <div class="col-md-6">
+            <h3>Events by classification</h3>
+            <table class="table table-sm w-auto">
+                <thead><tr><th>Classification</th><th class="text-end">Count</th></tr></thead>
+                <tbody>
+                    @foreach (var kvp in _metrics.ByClassification.OrderByDescending(x => x.Value))
+                    {
+                        <tr><td>@kvp.Key</td><td class="text-end">@kvp.Value</td></tr>
+                    }
+                    @if (_metrics.ByClassification.Count == 0)
+                    {
+                        <tr><td colspan="2" class="text-muted">No events yet.</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
 }
 
 <h3 class="mt-4">Status</h3>
 <ul>
     <li>Phase 0 — Contracts: <strong>shipped</strong>.</li>
-    <li>Phase 1 — Event log + SQLite: <strong>shipped</strong> (you are dogfooding this).</li>
-    <li>Phase 2 — Classification + revocation: <em>pending</em>.</li>
+    <li>Phase 1 — Event log + SQLite: <strong>shipped</strong>.</li>
+    <li>Phase 2 — Classification + revocation: <strong>shipped</strong> (classification column, RuleBasedClassifier, LlmClassifier scaffold, IRevocationService, AddMneme DI ergonomic).</li>
     <li>Phase 3 — Projections: <em>pending</em>.</li>
     <li>Phase 4 — Capability-checked query API: <em>pending</em>.</li>
     <li>Phase 5 — Distillation pipeline: <em>pending</em>.</li>

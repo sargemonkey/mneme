@@ -28,12 +28,18 @@ using (var bootstrap = factory.Open())
 builder.Services.AddSingleton(factory);
 builder.Services.AddSingleton<IRedactor, RegexRedactor>();
 builder.Services.AddSingleton<IContentShapeSelector, AlwaysRedactedContent>();
+builder.Services.AddSingleton<Mneme.Classification.IClassifier, Mneme.Classification.RuleBasedClassifier>();
 builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
 builder.Services.AddSingleton<IMemoryAgent>(sp => new MemoryAgent(
     sp.GetRequiredService<SqliteConnectionFactory>(),
     sp.GetRequiredService<IRedactor>(),
     sp.GetRequiredService<IContentShapeSelector>(),
+    sp.GetRequiredService<Mneme.Classification.IClassifier>(),
     sp.GetRequiredService<TimeProvider>()));
+builder.Services.AddSingleton<Mneme.Revocation.IRevocationService>(sp =>
+    new Mneme.Revocation.SqliteRevocationService(
+        sp.GetRequiredService<SqliteConnectionFactory>(),
+        sp.GetRequiredService<TimeProvider>()));
 builder.Services.AddSingleton<StudioReadService>();
 
 var app = builder.Build();

@@ -28,6 +28,7 @@ public sealed class StudioReadService
         long events = ScalarLong(c, "SELECT COUNT(*) FROM memory_events;");
         long queued = ScalarLong(c, "SELECT COUNT(*) FROM distillation_queue;");
         long workstreams = ScalarLong(c, "SELECT COUNT(DISTINCT workstream_id) FROM memory_events;");
+        long revoked = ScalarLong(c, "SELECT COUNT(*) FROM memory_revocations;");
         var byCategory = new Dictionary<EpistemicCategory, long>();
         using (var cmd = c.CreateCommand())
         {
@@ -38,7 +39,17 @@ public sealed class StudioReadService
                 byCategory[(EpistemicCategory)r.GetInt32(0)] = r.GetInt64(1);
             }
         }
-        return Task.FromResult(new StudioMetrics(events, queued, workstreams, byCategory));
+        var byClassification = new Dictionary<Mneme.Contracts.Classification, long>();
+        using (var cmd = c.CreateCommand())
+        {
+            cmd.CommandText = "SELECT classification, COUNT(*) FROM memory_events GROUP BY classification;";
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+            {
+                byClassification[(Mneme.Contracts.Classification)r.GetInt32(0)] = r.GetInt64(1);
+            }
+        }
+        return Task.FromResult(new StudioMetrics(events, queued, workstreams, revoked, byCategory, byClassification));
     }
 
     public Task<IReadOnlyList<EventRow>> RecentEventsAsync(
@@ -49,19 +60,25 @@ public sealed class StudioReadService
         if (string.IsNullOrWhiteSpace(workstreamFilter))
         {
             cmd.CommandText = """
-                SELECT event_id, workstream_id, event_channel, category, valid_at, created_at, payload_json
-                FROM memory_events
-                ORDER BY created_at DESC
+                SELECT e.event_id, e.workstream_id, e.event_channel, e.category,
+                       e.classification, e.valid_at, e.created_at, e.payload_json,
+                       r.revoked_at IS NOT NULL AS is_revoked
+                FROM memory_events e
+                LEFT JOIN memory_revocations r ON r.event_id = e.event_id
+                ORDER BY e.created_at DESC
                 LIMIT $limit;
                 """;
         }
         else
         {
             cmd.CommandText = """
-                SELECT event_id, workstream_id, event_channel, category, valid_at, created_at, payload_json
-                FROM memory_events
-                WHERE workstream_id = $ws
-                ORDER BY created_at DESC
+                SELECT e.event_id, e.workstream_id, e.event_channel, e.category,
+                       e.classification, e.valid_at, e.created_at, e.payload_json,
+                       r.revoked_at IS NOT NULL AS is_revoked
+                FROM memory_events e
+                LEFT JOIN memory_revocations r ON r.event_id = e.event_id
+                WHERE e.workstream_id = $ws
+                ORDER BY e.created_at DESC
                 LIMIT $limit;
                 """;
             cmd.Parameters.AddWithValue("$ws", workstreamFilter);
@@ -77,9 +94,11 @@ public sealed class StudioReadService
                 WorkstreamId: r.GetString(1),
                 Channel: (EventChannel)r.GetInt32(2),
                 Category: (EpistemicCategory)r.GetInt32(3),
-                ValidAt: DateTimeOffset.Parse(r.GetString(4), System.Globalization.CultureInfo.InvariantCulture),
-                CreatedAt: DateTimeOffset.Parse(r.GetString(5), System.Globalization.CultureInfo.InvariantCulture),
-                PayloadJson: r.GetString(6)));
+                Classification: (Mneme.Contracts.Classification)r.GetInt32(4),
+                ValidAt: DateTimeOffset.Parse(r.GetString(5), System.Globalization.CultureInfo.InvariantCulture),
+                CreatedAt: DateTimeOffset.Parse(r.GetString(6), System.Globalization.CultureInfo.InvariantCulture),
+                PayloadJson: r.GetString(7),
+                IsRevoked: r.GetInt64(8) != 0));
         }
         return Task.FromResult<IReadOnlyList<EventRow>>(rows);
     }
@@ -107,13 +126,17 @@ public sealed record StudioMetrics(
     long TotalEvents,
     long QueuedForDistillation,
     long Workstreams,
-    IReadOnlyDictionary<EpistemicCategory, long> ByCategory);
+    long Revoked,
+    IReadOnlyDictionary<EpistemicCategory, long> ByCategory,
+    IReadOnlyDictionary<Mneme.Contracts.Classification, long> ByClassification);
 
 public sealed record EventRow(
     string EventId,
     string WorkstreamId,
     EventChannel Channel,
     EpistemicCategory Category,
+    Mneme.Contracts.Classification Classification,
     DateTimeOffset ValidAt,
     DateTimeOffset CreatedAt,
-    string PayloadJson);
+    string PayloadJson,
+    bool IsRevoked);

@@ -27,7 +27,7 @@ namespace Mneme.Storage;
 public static class SqliteSchema
 {
     /// <summary>Current schema version. Bumped when the DDL changes incompatibly.</summary>
-    public const int Version = 1;
+    public const int Version = 2;
 
     /// <summary>
     /// Idempotently create all Phase 1 tables, indexes, and the
@@ -49,6 +49,13 @@ public static class SqliteSchema
             cmd.ExecuteNonQuery();
         }
 
+        // Schema v2 migration: idempotently add the classification column
+        // to existing memory_events tables. Safe to run on every startup —
+        // SQLite ignores the ALTER if the column already exists (we catch
+        // the duplicate-column error rather than feature-detect).
+        TryAlter(connection, tx,
+            "ALTER TABLE memory_events ADD COLUMN classification INTEGER NOT NULL DEFAULT 0;");
+
         using (var cmd = connection.CreateCommand())
         {
             cmd.Transaction = tx;
@@ -62,6 +69,21 @@ public static class SqliteSchema
         }
 
         tx.Commit();
+    }
+
+    private static void TryAlter(SqliteConnection connection, SqliteTransaction tx, string sql)
+    {
+        try
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = sql;
+            cmd.ExecuteNonQuery();
+        }
+        catch (SqliteException ex) when (ex.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
+        {
+            // Column already present — migration was applied in a previous run.
+        }
     }
 
     // memory_events is the append-only event log — source of truth.
@@ -106,6 +128,7 @@ public static class SqliteSchema
             payload_json    TEXT NOT NULL,
             provenance_json TEXT NOT NULL,
             content_shape   INTEGER NOT NULL,
+            classification  INTEGER NOT NULL DEFAULT 0,
             artifact_id     TEXT,
             FOREIGN KEY (artifact_id) REFERENCES memory_artifacts(artifact_id)
         ) WITHOUT ROWID;
@@ -150,5 +173,22 @@ public static class SqliteSchema
 
         CREATE INDEX IF NOT EXISTS idx_distillation_queue_workstream
             ON distillation_queue(workstream_id, enqueued_at);
+
+        -- Phase 2 — sidecar revocation table. Append-only itself:
+        -- PRIMARY KEY on event_id enforces one revocation per event.
+        -- memory_events stays untouched so the source-of-truth invariant
+        -- still holds; the body in memory_artifacts is nulled by the
+        -- revocation service in the same transaction.
+        CREATE TABLE IF NOT EXISTS memory_revocations (
+            event_id        TEXT NOT NULL PRIMARY KEY,
+            workstream_id   TEXT NOT NULL,
+            revoked_at      TEXT NOT NULL,
+            revoked_by      TEXT NOT NULL,
+            reason          TEXT NOT NULL,
+            FOREIGN KEY (event_id) REFERENCES memory_events(event_id)
+        ) WITHOUT ROWID;
+
+        CREATE INDEX IF NOT EXISTS idx_memory_revocations_workstream
+            ON memory_revocations(workstream_id, revoked_at);
         """;
 }

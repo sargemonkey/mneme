@@ -10,7 +10,7 @@ public sealed class EventSerializationTests
     {
         EventPayload[] payloads =
         {
-            new EvidencePayload("body", "src", Classification.Internal),
+            new EvidencePayload("body", "src", Mneme.Contracts.Classification.Internal),
             new FactPayload("the sky is blue", new List<EventId>{ new("01H0EVID00000000000000000A") }),
             new DecisionPayload("use postgres", "scaling", Array.Empty<EventId>(), new PrincipalId("alice")),
             new HypothesisPayload("cache helps", HypothesisState.Open),
