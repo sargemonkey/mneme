@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <OutputType>WinExe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Mneme.Studio.Desktop</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Photino.NET" Version="2.0.13" />
+  </ItemGroup>
+
+  <!-- Reuse the entire web Studio: this project hosts the same ASP.NET
+       Core app in-process on a private port, then opens a Photino window
+       pointed at that port. Single source of truth for UI; the desktop
+       app and the browser app are literally the same pages. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Mneme.Studio\Mneme.Studio.csproj" />
+  </ItemGroup>
+
+</Project>

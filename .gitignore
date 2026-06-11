@@ -51,4 +51,6 @@ scratch/
 
 # Mneme.Studio runtime data
 src/Mneme.Studio/data/
+src/Mneme.Studio.Desktop/data/
+src/Mneme.Studio.Desktop/bin/Debug/net8.0/data/
 
