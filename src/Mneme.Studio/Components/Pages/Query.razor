@@ -1,0 +1,164 @@
+@page "/query"
+@rendermode InteractiveServer
+@using Mneme.Contracts
+@inject IMemoryQueryAPI Api
+@inject CapabilityToken Token
+@inject StudioReadService Read
+
+<PageTitle>Query — Mneme.Studio</PageTitle>
+
+<h1>Query</h1>
+<p class="text-muted">
+    Capability-checked <code>IMemoryQueryAPI.QueryAsync</code> against the
+    DI-registered <code>CapabilityToken</code>. Toggle <em>Explain</em> to
+    see dispatcher choice, capability trace, and per-item score
+    decomposition. Cross-workstream is intentionally unsupported here;
+    use the <em>AddMneme</em> default token (single workstream).
+</p>
+
+<EditForm Model="this" OnValidSubmit="Run" FormName="query">
+    <div class="row g-2 my-3 align-items-end">
+        <div class="col-md-3">
+            <label class="form-label">Workstream</label>
+            <select class="form-select" @bind="_workstream">
+                @foreach (var w in _workstreams)
+                {
+                    <option value="@w">@w</option>
+                }
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">Free text (optional)</label>
+            <InputText class="form-control" @bind-Value="_freeText" />
+        </div>
+        <div class="col-md-2">
+            <label class="form-label">As of (ISO 8601, opt.)</label>
+            <InputText class="form-control" @bind-Value="_asOf" />
+        </div>
+        <div class="col-md-2">
+            <label class="form-label">Limit</label>
+            <select class="form-select" @bind="_limit">
+                <option value="10">10</option>
+                <option value="25">25</option>
+                <option value="100">100</option>
+            </select>
+        </div>
+        <div class="col-md-2 d-flex flex-column gap-1">
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" @bind="_explain" id="x" />
+                <label class="form-check-label" for="x">Explain</label>
+            </div>
+            <button class="btn btn-primary w-100" type="submit">Run</button>
+        </div>
+    </div>
+</EditForm>
+
+<p class="text-muted small">
+    Token: principal=<code>@Token.Principal.Value</code>,
+    workstream=<code>@(Token.Workstream?.Value ?? "<cross>")</code>,
+    valid <code>@Token.NotBefore.ToString("u")</code>..<code>@Token.NotAfter.ToString("u")</code>,
+    includeTechnical=<code>@Token.IncludeTechnical</code>.
+</p>
+
+@if (_error is not null)
+{
+    <div class="alert alert-danger">@_error</div>
+}
+
+@if (_result is not null)
+{
+    @if (_result.Explain is not null)
+    {
+        <div class="alert alert-info">
+            <strong>Explain</strong>:
+            dispatcher=<code>@_result.Explain.DispatcherChoice</code>;
+            considered=<code>@_result.Explain.CandidatesConsidered</code>;
+            gated_out=<code>@_result.Explain.CandidatesGatedOut</code>;
+            capability=<code>@_result.Explain.CapabilityCheck</code>
+        </div>
+    }
+    <p class="text-muted small">@_result.Items.Count item(s) (total matched: @_result.TotalMatched)</p>
+
+    <table class="table table-sm">
+        <thead>
+            <tr>
+                <th>event_id</th>
+                <th>category</th>
+                <th>valid_at</th>
+                <th>summary</th>
+                <th class="text-end">score</th>
+                @if (_explain) { <th>details</th> }
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var item in _result.Items)
+            {
+                <tr>
+                    <td><code>@item.EventId.Value</code></td>
+                    <td>@item.Category</td>
+                    <td><code>@item.ValidAt.ToString("u")</code></td>
+                    <td>@item.Summary</td>
+                    <td class="text-end"><strong>@item.Score.ToString("F3")</strong></td>
+                    @if (_explain && item.Details is not null)
+                    {
+                        <td class="small text-muted">
+                            sem=@item.Details.Semantic.ToString("F2"),
+                            bm25=@item.Details.Bm25.ToString("F2"),
+                            ent=@item.Details.EntityBoost.ToString("F2"),
+                            cur=@item.Details.CurationMultiplier.ToString("F2"),
+                            fused=@item.Details.Fused.ToString("F2"),
+                            gate=@(item.Details.PassedSemanticThreshold ? "pass" : "fail")
+                            @(item.Details.GateReason is null ? "" : " (" + item.Details.GateReason + ")")
+                        </td>
+                    }
+                    else if (_explain) { <td></td> }
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private string _workstream = "";
+    private string _freeText = "";
+    private string _asOf = "";
+    private int _limit = 25;
+    private bool _explain = true;
+    private QueryResult? _result;
+    private string? _error;
+    private IReadOnlyList<string> _workstreams = Array.Empty<string>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _workstreams = await Read.WorkstreamsAsync();
+        if (_workstreams.Count > 0 && string.IsNullOrEmpty(_workstream))
+        {
+            _workstream = Token.Workstream?.Value ?? _workstreams[0];
+        }
+    }
+
+    private async Task Run()
+    {
+        _error = null;
+        try
+        {
+            DateTimeOffset? asOf = null;
+            if (!string.IsNullOrWhiteSpace(_asOf))
+            {
+                if (!DateTimeOffset.TryParse(_asOf, out var t)) throw new ArgumentException("AsOf is not a valid ISO 8601 timestamp");
+                asOf = t;
+            }
+            var spec = new QuerySpec(
+                Workstream: new WorkstreamId(_workstream),
+                FreeText: string.IsNullOrWhiteSpace(_freeText) ? null : _freeText,
+                AsOf: asOf,
+                Limit: _limit);
+            _result = await Api.QueryAsync(new QueryRequest(spec, Explain: _explain), Token);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            _result = null;
+        }
+    }
+}

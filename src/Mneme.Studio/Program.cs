@@ -49,6 +49,21 @@ builder.Services.AddSingleton<Mneme.Revocation.IRevocationService>(sp =>
     new Mneme.Revocation.SqliteRevocationService(
         sp.GetRequiredService<SqliteConnectionFactory>(),
         sp.GetRequiredService<TimeProvider>()));
+builder.Services.AddSingleton<IMemoryQueryAPI>(sp => new Mneme.Query.MemoryQueryApi(
+    sp.GetRequiredService<SqliteConnectionFactory>(),
+    sp.GetRequiredService<Mneme.Search.TextSearchService>(),
+    sp.GetRequiredService<TimeProvider>()));
+// Studio's default capability token: principal=studio-user, scoped to
+// every workstream visible to Studio. Cross-workstream so the Query
+// page works against whatever the user picks.
+builder.Services.AddSingleton(sp => new CapabilityToken(
+    Principal: new PrincipalId("studio-user"),
+    Workstream: null,
+    NotBefore: DateTimeOffset.UtcNow,
+    NotAfter: DateTimeOffset.UtcNow.AddDays(365),
+    AllowedCategories: Array.Empty<EpistemicCategory>(),
+    CrossWorkstream: true,
+    IncludeTechnical: false));
 builder.Services.AddSingleton<StudioReadService>();
 
 var app = builder.Build();

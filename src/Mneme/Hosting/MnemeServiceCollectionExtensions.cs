@@ -6,6 +6,7 @@ using Mneme.Ingest;
 using Mneme.Ingest.Redaction;
 using Mneme.Ingest.Validation;
 using Mneme.Projections;
+using Mneme.Query;
 using Mneme.Revocation;
 using Mneme.Search;
 using Mneme.Storage;
@@ -93,6 +94,10 @@ public static class MnemeServiceCollectionExtensions
             sp.GetServices<IIngestObserver>()));
         services.TryAddSingleton<IRevocationService>(sp => new SqliteRevocationService(
             sp.GetRequiredService<SqliteConnectionFactory>(),
+            sp.GetRequiredService<TimeProvider>()));
+        services.TryAddSingleton<IMemoryQueryAPI>(sp => new MemoryQueryApi(
+            sp.GetRequiredService<SqliteConnectionFactory>(),
+            sp.GetRequiredService<TextSearchService>(),
             sp.GetRequiredService<TimeProvider>()));
 
         var permitted = opts.PermittedCategories?.ToArray()
