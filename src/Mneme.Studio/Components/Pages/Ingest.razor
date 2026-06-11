@@ -1,0 +1,155 @@
+@page "/ingest"
+@rendermode InteractiveServer
+@using Mneme.Contracts
+@inject IMemoryAgent Agent
+@inject StudioReadService Read
+
+<PageTitle>Ingest event — Mneme.Studio</PageTitle>
+
+<h1>Ingest event</h1>
+<p class="text-muted">
+    Build a <code>CaptureEvent</code> and push it through
+    <code>IMemoryAgent.IngestAsync</code>. The sync stage runs in-process:
+    validate → redact → classify (stub) → WAL commit. Returns after the
+    commit; distillation will run asynchronously in a later phase.
+</p>
+
+<EditForm Model="_form" OnValidSubmit="Submit" FormName="ingest">
+    <div class="row g-3">
+        <div class="col-md-4">
+            <label class="form-label">Workstream id</label>
+            <InputText class="form-control" @bind-Value="_form.WorkstreamId" />
+            <small class="form-text text-muted">lowercase, alnum, '-' '_' '.'; 1–128 chars</small>
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Category</label>
+            <InputSelect class="form-select" @bind-Value="_form.Category">
+                @foreach (var c in Enum.GetValues<EpistemicCategory>())
+                {
+                    <option value="@c">@c</option>
+                }
+            </InputSelect>
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Channel</label>
+            <InputSelect class="form-select" @bind-Value="_form.Channel">
+                <option value="@EventChannel.Epistemic">Epistemic</option>
+                <option value="@EventChannel.Technical">Technical</option>
+            </InputSelect>
+        </div>
+
+        <div class="col-md-6">
+            <label class="form-label">Principal id</label>
+            <InputText class="form-control" @bind-Value="_form.Principal" />
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">Source id</label>
+            <InputText class="form-control" @bind-Value="_form.Source" />
+        </div>
+
+        <div class="col-12">
+            <label class="form-label">Statement / content</label>
+            <InputTextArea class="form-control" rows="4" @bind-Value="_form.Statement" />
+            <small class="form-text text-muted">
+                Secrets (OpenAI keys, AWS keys, JWTs, PEM blocks, …) are
+                stripped inline at ingest. Paste a fake one to see it
+                replaced with a <code>&lt;REDACTED:rule&gt;</code> marker.
+            </small>
+        </div>
+
+        @if (_form.Category == EpistemicCategory.Decision)
+        {
+            <div class="col-12">
+                <label class="form-label">Rationale</label>
+                <InputTextArea class="form-control" rows="2" @bind-Value="_form.Rationale" />
+            </div>
+        }
+    </div>
+
+    <div class="my-3">
+        <button class="btn btn-primary" type="submit">Ingest</button>
+        <button class="btn btn-link" type="button" @onclick="GenerateRandomId">Re-roll event id</button>
+        <small class="text-muted ms-2">event_id = <code>@_form.EventId</code></small>
+    </div>
+</EditForm>
+
+@if (_lastResult is not null)
+{
+    <div class="alert @(_lastResult.WasDuplicate ? "alert-warning" : "alert-success")">
+        <strong>@(_lastResult.WasDuplicate ? "Duplicate (no-op)" : "Ingested")</strong>
+        — event_id <code>@_lastResult.EventId</code>
+        at <code>@_lastResult.RecordedAt:O</code>.
+    </div>
+}
+@if (_lastError is not null)
+{
+    <div class="alert alert-danger"><strong>Error:</strong> @_lastError</div>
+}
+
+@code {
+    private IngestForm _form = new();
+    private IngestResult? _lastResult;
+    private string? _lastError;
+
+    protected override void OnInitialized()
+    {
+        GenerateRandomId();
+    }
+
+    private void GenerateRandomId()
+    {
+        _form.EventId = "studio-" + Guid.NewGuid().ToString("N");
+    }
+
+    private async Task Submit()
+    {
+        _lastError = null;
+        _lastResult = null;
+        try
+        {
+            EventPayload payload = _form.Category switch
+            {
+                EpistemicCategory.Evidence => new EvidencePayload(_form.Statement, _form.Source),
+                EpistemicCategory.Fact => new FactPayload(_form.Statement, Array.Empty<EventId>()),
+                EpistemicCategory.Decision => new DecisionPayload(
+                    _form.Statement, _form.Rationale, Array.Empty<EventId>(),
+                    new PrincipalId(_form.Principal)),
+                EpistemicCategory.Hypothesis => new HypothesisPayload(_form.Statement, HypothesisState.Open),
+                EpistemicCategory.Goal => new GoalPayload(_form.Statement, GoalState.Active),
+                EpistemicCategory.Action => new ActionPayload(_form.Statement, null, null),
+                EpistemicCategory.Outcome => new OutcomePayload(_form.Statement,
+                    EventId.None, OutcomePolarity.Neutral),
+                _ => throw new InvalidOperationException("unknown category"),
+            };
+
+            var evt = new CaptureEvent(
+                new EventId(_form.EventId),
+                new WorkstreamId(_form.WorkstreamId),
+                _form.Channel,
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow,
+                payload,
+                new CaptureProvenance(
+                    new CaptureSourceId(_form.Source),
+                    new PrincipalId(_form.Principal)));
+            _lastResult = await Agent.IngestAsync(evt);
+            GenerateRandomId();
+        }
+        catch (Exception ex)
+        {
+            _lastError = ex.Message;
+        }
+    }
+
+    private sealed class IngestForm
+    {
+        public string EventId { get; set; } = "";
+        public string WorkstreamId { get; set; } = "studio-demo";
+        public EventChannel Channel { get; set; } = EventChannel.Epistemic;
+        public EpistemicCategory Category { get; set; } = EpistemicCategory.Evidence;
+        public string Principal { get; set; } = "studio-user";
+        public string Source { get; set; } = "mneme-studio";
+        public string Statement { get; set; } = "";
+        public string Rationale { get; set; } = "";
+    }
+}

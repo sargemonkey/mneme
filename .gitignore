@@ -48,3 +48,7 @@ local.settings.json
 *.mneme.db-shm
 local-data/
 scratch/
+
+# Mneme.Studio runtime data
+src/Mneme.Studio/data/
+

@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Mneme.Contracts/Mneme.Contracts.csproj" />
     <Project Path="src/Mneme.Mcp/Mneme.Mcp.csproj" />
+    <Project Path="src/Mneme.Studio/Mneme.Studio.csproj" />
     <Project Path="src/Mneme/Mneme.csproj" />
   </Folder>
   <Folder Name="/tests/">

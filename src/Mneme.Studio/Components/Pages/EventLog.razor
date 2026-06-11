@@ -1,0 +1,98 @@
+@page "/events"
+@rendermode InteractiveServer
+@inject StudioReadService Read
+
+<PageTitle>Event log — Mneme.Studio</PageTitle>
+
+<h1>Event log</h1>
+<p class="text-muted">
+    The append-only <code>memory_events</code> table, newest first.
+    Filter by workstream. Click a row to expand the redacted payload.
+</p>
+
+<div class="row g-2 my-3 align-items-end">
+    <div class="col-md-4">
+        <label class="form-label">Workstream</label>
+        <select class="form-select" @bind="_workstream" @bind:after="Reload">
+            <option value="">(all)</option>
+            @foreach (var w in _workstreams)
+            {
+                <option value="@w">@w</option>
+            }
+        </select>
+    </div>
+    <div class="col-md-2">
+        <label class="form-label">Limit</label>
+        <select class="form-select" @bind="_limit" @bind:after="Reload">
+            <option value="25">25</option>
+            <option value="100">100</option>
+            <option value="500">500</option>
+        </select>
+    </div>
+    <div class="col-md-2">
+        <button class="btn btn-secondary" @onclick="Reload">Refresh</button>
+    </div>
+</div>
+
+@if (_rows is null)
+{
+    <p><em>Loading…</em></p>
+}
+else if (_rows.Count == 0)
+{
+    <p class="text-muted">No events yet.</p>
+}
+else
+{
+    <table class="table table-striped table-sm">
+        <thead>
+            <tr>
+                <th>created_at (UTC)</th>
+                <th>workstream</th>
+                <th>channel</th>
+                <th>category</th>
+                <th>event_id</th>
+                <th>valid_at</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var r in _rows)
+            {
+                <tr class="@(_expanded == r.EventId ? "table-active" : null)" @onclick="() => Toggle(r.EventId)" style="cursor:pointer">
+                    <td><code>@r.CreatedAt.ToString("u")</code></td>
+                    <td>@r.WorkstreamId</td>
+                    <td>@r.Channel</td>
+                    <td>@r.Category</td>
+                    <td><code>@r.EventId</code></td>
+                    <td><code>@r.ValidAt.ToString("u")</code></td>
+                </tr>
+                @if (_expanded == r.EventId)
+                {
+                    <tr>
+                        <td colspan="6">
+                            <pre class="bg-light p-2 mb-0" style="white-space:pre-wrap">@r.PayloadJson</pre>
+                        </td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private IReadOnlyList<EventRow>? _rows;
+    private IReadOnlyList<string> _workstreams = Array.Empty<string>();
+    private string _workstream = "";
+    private int _limit = 25;
+    private string? _expanded;
+
+    protected override async Task OnInitializedAsync() => await Reload();
+
+    private async Task Reload()
+    {
+        _workstreams = await Read.WorkstreamsAsync();
+        _rows = await Read.RecentEventsAsync(string.IsNullOrEmpty(_workstream) ? null : _workstream, _limit);
+    }
+
+    private void Toggle(string id) => _expanded = _expanded == id ? null : id;
+}

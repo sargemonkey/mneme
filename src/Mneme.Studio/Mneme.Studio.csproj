@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Mneme.Studio</RootNamespace>
+    <UserSecretsId>mneme-studio-dev</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Mneme\Mneme.csproj" />
+    <ProjectReference Include="..\Mneme.Contracts\Mneme.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>
