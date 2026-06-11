@@ -46,7 +46,19 @@ still needed for your task.
 6. **[`plans/research-existing-systems.md`](plans/research-existing-systems.md)**
    — skim if you're tempted to suggest "let's just use X instead." 19
    alternatives were evaluated; the answer is in there.
-7. **[`plans/consumer-architecture-reference.md`](plans/consumer-architecture-reference.md)**
+7. **[`plans/research-design-lessons.md`](plans/research-design-lessons.md)**
+   — source-level deep dives of Mem0, Letta, Cognee, MCP ecosystem,
+   and MS Agent Framework + KM², with cross-cutting design patterns
+   and an explicit stress-test of Mneme's plan. **§3 lists the design
+   ideas adopted** into this codebase; **§5 maps each new backlog
+   task to its source justification.** Read §2 sub-sections for any
+   framework you're studying; §3 before designing the corresponding
+   surface; §4 before defending a contested design choice.
+8. **[`plans/memory-systems-primer.md`](plans/memory-systems-primer.md)**
+   — vocabulary + mental model for agent memory systems. Read first
+   if you're new to the field. The §14 comparison matrix is the
+   reference for evaluating any new memory product against Mneme.
+9. **[`plans/consumer-architecture-reference.md`](plans/consumer-architecture-reference.md)**
    — only if you're touching the contracts surface and want to
    understand how a consumer (MuxiMuxi cockpit) wires Mneme in.
 
@@ -152,14 +164,30 @@ These are load-bearing. Changing any of them needs a written ADR in
    deterministic keys (email, GitHub ID, Linear ID, …). LLM-judgment
    merges go through a propose-then-confirm pipeline; they never
    auto-apply. Stricter than Graphiti on purpose.
-10. **Pluggable LLM provider.** Mneme's distillation/classification LLM
-    is wired through an abstraction; never hardcode OpenAI/Anthropic
-    /Azure. Semantic Kernel is the planned indirection.
+10. **Pluggable LLM provider via `Microsoft.Extensions.AI.IChatClient`.**
+    Mneme's distillation / classification / entity-resolution LLM
+    calls go through `IChatClient` (from
+    `Microsoft.Extensions.AI.Abstractions ≥ 10.4.0`). Never hardcode
+    OpenAI / Anthropic / Azure. **`IChatClient` replaces the earlier
+    Semantic Kernel plan** — see `research-design-lessons.md` §2.15
+    + §4.7 for rationale (MAF dropped SK; `IChatClient` is now the
+    .NET LLM abstraction). Mneme/Llm/ project depends only on
+    `Microsoft.Extensions.AI.Abstractions`.
 11. **No PII / secret storage.** Secret redactor runs **inline at
     ingest**. Classifier labels stay metadata-only; if a label says
     "contains secret", the redactor should have already removed it.
 12. **Workstream scope on every event.** No global / cross-workstream
     queries unless the capability token explicitly grants it.
+13. **HITL curation is first-class, not an afterthought.** Curation
+    operations (`amend`, `annotate`, `pin`, `demote`, `split`,
+    `merge`, `revert`) flow through `IMemoryCurator` with a
+    `CurationCapability` token, separate from `IMemoryAgent`
+    (ingest) and `IMemoryQueryAPI` (read). Every curation is an
+    append-only event with a stale-state guard (Letta
+    `core_memory_replace` pattern). **Never** mutate projections or
+    artifacts in place; always append a curation event and let the
+    projector apply it. See `plan.md` "Human-in-the-loop curation"
+    section.
 
 ## Locked decisions — do not relitigate without an ADR
 
@@ -174,10 +202,15 @@ think they're wrong, open an issue with new evidence; don't just
 | Build, not adopt Graphiti/Zep/Mem0 | `research-existing-systems.md` + `research-zep-sqlite-deepdive.md` | All Python-first; Graphiti is "schema+prompts on Neo4j" and the schema/prompts are portable under Apache 2.0. |
 | Apache-2.0 | `LICENSE`, `NOTICE` | Compatible with porting Graphiti prompts (also Apache 2.0); permissive enough for commercial reuse. |
 | Append-only + projections > graph DB | `plan.md` "Storage architecture" | Event log = audit + rebuildable; projections = fast reads. |
-| Conservative entity resolution | `plan.md` "Entity resolution" | Auto-merge on deterministic keys only. Stricter than Graphiti. |
-| Pluggable LLM, default Semantic Kernel | `plan.md` "LLM provider" | Don't lock users to one vendor. |
+| Conservative entity resolution (three-tier) | `plan.md` "Entity resolution" + `research-design-lessons.md` §3.4 | Tier 1: deterministic UUID5 auto-merge. Tier 2: embedding ≥0.95 cosine. Tier 3: LLM-propose + human-confirm. Stricter than Graphiti. |
+| Pluggable LLM via `IChatClient` | `research-design-lessons.md` §2.15 + §4.7 | `Microsoft.Extensions.AI.IChatClient` (≥10.4.0). **Supersedes earlier Semantic Kernel choice** — MAF dropped SK; `IChatClient` is now the .NET LLM abstraction. |
 | Workstream isolation by default | `plan.md` "Capability tokens" | Cross-workstream requires explicit grant; not opt-out. |
+| Sync ingest + async distillation split | `research-design-lessons.md` §3.2 + §4.2 | `Ingest` returns <50ms after WAL commit; distillation runs in a `DistillationJob` worker. Evidence: Mem0 v2→v3 dropped sync invalidation, +20 LoCoMo points. |
+| MCP tool naming = community vocabulary | `research-design-lessons.md` §2.8 + §4.5 | MCP edge exposes `remember` / `query` / `distill` / `forget` / `list_recent`. .NET `IMemoryQueryAPI` keeps Mneme-native names. |
+| MAF integration via `MessageAIContextProvider` | `research-design-lessons.md` §2.15 | No custom `IMemoryStore` interface — MAF's integration seam is `MessageAIContextProvider`. `Mneme.Agents.AI` ships a derived class. |
+| Bi-temporal as Mneme's primary differentiator | `research-design-lessons.md` §4.8 + `memory-systems-primer.md` §7 | Two timestamps (`valid_at`, `recorded_at`); architecturally beats single-timestamp competitors on temporal benchmarks. Mneme must run LoCoMo + LongMemEval to verify. |
 | No vector search in v1 | `plan.md` Phase 11 / `research-zep-sqlite-deepdive.md` §6 | sqlite-vec pre-v1 as of 2026-06; FTS5 + structured queries are enough for v1. |
+| HITL curation as first-class | `plan.md` "Human-in-the-loop curation" + `backlog.md` Phase 7.5 | Strong curation API beyond confirm/revoke: `amend`, `annotate`, `pin`, `demote`, `split`, `merge`, `revert`. All as append-only events with stale-state guards. `IMemoryCurator` + `CurationCapability` separate from ingest/query interfaces. Differentiator vs. Mem0/Letta/Cognee/Zep (which only support point-curation). |
 
 ## Open / welcome to refine
 

@@ -6,16 +6,71 @@ MuxiMuxi cockpit, third-party agent hosts) bind against.
 
 ## Status
 
-**Phase 0 — not started.** This project intentionally has no source files
-yet. See [`plans/plan.md`](../../plans/plan.md) Phase 0 for the contracts
-that will land here:
+**Phase 0 — shipped.** Pure-BCL contract surface for ingest, query, capability
+checks, distillation bundles, and human-in-the-loop curation. All public types
+are records, interfaces, enums, or exceptions; **no implementation code lives
+here**. Verified by [`ContractSurfaceTests`](../../tests/Mneme.Contracts.Tests/ContractSurfaceTests.cs).
 
-- `CaptureEvent` — the wire envelope for events ingested by Mneme
-- `CapabilityToken` — workstream-scoped query authorization
-- `IMemoryAgent` — single-subscriber ingest API (capture → memory)
-- `IMemoryQueryAPI` — capability-checked query API (consumers → memory)
-- Supporting enums + records (epistemic categories, classification labels,
-  query/distill specs)
+### Shipped types
+
+**Capture / ingest**
+- [`CaptureEvent`](CaptureEvent.cs), [`CaptureProvenance`](CaptureEvent.cs),
+  [`CaptureSourceId`](CaptureEvent.cs), [`IngestResult`](CaptureEvent.cs)
+- [`EventPayload`](EventPayloads.cs) (abstract, STJ-polymorphic) with seven
+  sealed derived records: `EvidencePayload`, `FactPayload`, `DecisionPayload`,
+  `HypothesisPayload`, `GoalPayload`, `ActionPayload`, `OutcomePayload`.
+- [`IMemoryAgent.IngestAsync`](IMemoryAgent.cs) — single-subscriber ingest;
+  contract documents the <50 ms post-WAL latency target.
+
+**Query / distillation**
+- [`IMemoryQueryAPI`](IMemoryQueryAPI.cs), [`QuerySpec`](QuerySpec.cs),
+  [`QueryRequest`](QuerySpec.cs), [`DistillOptions`](QuerySpec.cs)
+- [`QueryResult`](QueryResult.cs), [`QueryResultItem`](QueryResult.cs),
+  [`ScoreDetails`](QueryResult.cs) (fused vs. final separation),
+  [`QueryExplain`](QueryResult.cs)
+- [`ContextBundle`](ContextBundle.cs) two-tier shape: `BundleIndex` +
+  `BundleSection` + `OrientationSummary` + `LookupHints` + `LookupHint`,
+  each carrying staleness metadata.
+
+**Identity / authorization**
+- Strong-typed IDs as `readonly record struct`: [`EventId`](Identifiers.cs)
+  (with `None` sentinel), `WorkstreamId`, `FactId`, `EntityId`, `PrincipalId`.
+- [`CapabilityToken`](CapabilityToken.cs) — read/query authorization with
+  `IsValidAt`, `Allows`, `CrossWorkstream`, `IncludeTechnical`.
+- [`CurationCapability`](CurationCapability.cs) — write authorization;
+  least-privilege defaults (all eight `CanX` flags default to `false`).
+- [`CapabilityDeniedError`](Exceptions.cs) (subclass of
+  `UnauthorizedAccessException`), [`StaleProposalError`](Exceptions.cs)
+  (subclass of `InvalidOperationException`).
+
+**Human-in-the-loop curation (Mneme differentiator)**
+- [`IMemoryCurator`](IMemoryCurator.cs) — all seven curation operations
+  (amend, annotate, pin, demote, split, merge, revert).
+- [`ICurationLog`](ICurationLog.cs) — append-only audit history.
+- [`IReviewQueue`](IReviewQueue.cs) — pre-distillation approve / reject /
+  defer flow for `WorkstreamMode.ReviewBeforeDistill`.
+- [`CurationResult`](Curation.cs), [`CurationEntry`](Curation.cs),
+  [`FactAmendment`](Curation.cs), [`FactSplitPart`](Curation.cs),
+  [`FactMerged`](Curation.cs), [`PendingReviewItem`](Curation.cs).
+
+**Enums** (in [`Enums.cs`](Enums.cs) and [`EventPayloads.cs`](EventPayloads.cs))
+- `EpistemicCategory` (7), `EventChannel`, `Classification`, `CurationType` (7),
+  `WorkstreamMode`, `PinScope`, `HypothesisState`, `GoalState`, `OutcomePolarity`.
+
+### Verification
+
+Run from the repository root:
+
+```pwsh
+dotnet build src/Mneme.Contracts/Mneme.Contracts.csproj
+dotnet test  tests/Mneme.Contracts.Tests/Mneme.Contracts.Tests.csproj
+```
+
+136 tests cover identifier equality, enum stability, payload polymorphism
+(JSON round-trip), capability/curation defaults, exception subtyping,
+bundle/query round-trips, and a reflection-based surface invariant that
+fails the build if a non-record/non-interface/non-enum/non-exception type
+is ever added to this assembly.
 
 ## Design rules
 

@@ -168,32 +168,159 @@ Classifier is pluggable; user can swap models.
 ### Distillation pipeline (the primary value)
 
 When a capture event arrives, memory agent doesn't just persist — it
-**distills**. Pipeline:
+**distills**. The pipeline is split into **synchronous** and
+**asynchronous** stages (see `research-design-lessons.md` §3.2 + §4.2;
+Mem0 v2→v3 dropped synchronous LLM invalidation, gaining +20 LoCoMo
+points):
 
-1. **Persist** raw event to `memory_events`
-2. **Classify** (sensitivity tagging)
-3. **Extract** structured facts / entities / hypotheses / goals from event
-   payload (LLM-assisted)
-4. **Resolve** entities against `entity_index` (deterministic match → auto-link;
-   ambiguous → provisional entity + suggest merge — see Conservative Entity
-   Resolution)
-5. **Update** projections (current_facts, decision_chains, etc.)
-6. **Synthesize** a distillation if criteria met (e.g., decision approved →
-   produce "context bundle for this workstream's next agent invocation")
-7. **Index** for retrieval (text index in v1; vector index in v2)
+**Synchronous (on the `Ingest` call, target <50ms):**
+
+1. **Validate** — schema, capability token, dedup-on-content-hash.
+2. **Redact** — regex-based secret scrub (inline, non-bypassable).
+3. **Classify** — sensitivity label (cheap LLM call OR rules-only;
+   non-blocking variant logged for the worker).
+4. **Persist** — append to `memory_events` with WAL commit. Return.
+
+**Asynchronous (background `DistillationJob` worker — "sleep-time
+compute" pattern per Letta `sleeptime_multi_agent_v4.py`,
+arXiv 2504.13171):**
+
+5. **Extract** structured facts / entities / hypotheses / goals from
+   event payload (LLM-assisted, **ADD-only single-pass** — no
+   simultaneous invalidation; reconciliation is a separate stage).
+6. **Resolve** entities against `entity_index` (three-tier:
+   deterministic UUID5 → embedding similarity ≥0.95 →
+   LLM-propose+human-confirm — see Conservative Entity Resolution).
+7. **Update** projections (current_facts, decision_chains, etc.).
+8. **Reconcile** — propose invalidations of superseded facts through
+   the propose-then-confirm pipeline. **Never** edit in place in
+   ingest's LLM call.
+9. **Synthesize** distillation bundle if criteria met.
+10. **Index** for retrieval (text index in v1; vector index in v2).
+
+**Per-workstream pessimistic lock**: the worker holds a SQLite
+row-level mutex on `distillation_locks(workstream_id PRIMARY KEY)`
+during a run. Idle/quiet triggers and SessionEnd hooks both target
+the worker; the lock deduplicates concurrent triggers (pattern from
+Cognee `try_acquire_improve_lock`).
+
+**Read-after-write staleness**: between WAL commit and worker
+completion, the freshly-ingested event is in the log but not yet in
+projections / bundles. Consumers handle this via the **staleness
+contract** on bundle responses (see next section).
 
 Distillation outputs:
 
-- **Workstream context bundle** — what an agent needs to know about this
-  workstream right now (current goals, recent decisions, open hypotheses, key
-  facts about referenced entities, recent outcomes)
+- **Workstream context bundle** — what an agent needs to know about
+  this workstream right now (current goals, recent decisions, open
+  hypotheses, key facts about referenced entities, recent outcomes)
 - **Decision rationale** — why X was decided, with citations
-- **Cross-loop insight** — when a new signal matches patterns from past
-  workstreams (informs but doesn't auto-act)
+- **Cross-loop insight** — when a new signal matches patterns from
+  past workstreams (informs but doesn't auto-act)
 
-**Compressed context goal**: an agent should query "distill what I need to
-know about this workstream" and get back ~2–4k tokens of useful synthesis,
-NOT a 50k-token raw event dump.
+**Compressed context goal**: an agent should query "distill what I
+need to know about this workstream" and get back ~2–4k tokens of
+useful synthesis, NOT a 50k-token raw event dump.
+
+### Bundle staleness contract (rubber-duck finding L)
+
+Because distillation is async, every `ContextBundle` response carries
+explicit staleness metadata so consumers can reason about whether
+their context is current:
+
+- `GeneratedAt` — when the bundle was synthesized.
+- `EventsCoveredThrough` — the last `event_id` (ULID) included in
+  the bundle. Compare against the workstream's current head to
+  detect drift.
+- `IsStale` — convenience flag (true if drift exceeds a per-bundle
+  threshold).
+- `ForceRefresh` parameter on `DistillAsync` — caller's escape hatch
+  to bypass cache and synthesize a fresh bundle synchronously.
+
+Without these fields a consuming agent cannot tell whether the
+bundle reflects the latest writes. See `research-design-lessons.md`
+§4.2 for the analysis.
+
+### Bundle shape — two-tier (`BundleIndex` + `BundleSection`)
+
+The distillation result is composed of:
+
+- **`BundleIndex`** (always-loadable, ~500–1000 tokens) — names the
+  available sections, their categories, staleness flags, and short
+  descriptions. Cheap to ship every turn.
+- **`BundleSection[]`** (on-demand, 2–4k tokens each) — per-category
+  rich content. Consumers fetch sections by name only when needed.
+- **`OrientationSummary`** — single paragraph "where are we" prepend
+  generated atop the index. Orients the consuming LLM before the
+  data dump. Pattern from Cognee `GlobalContextSummary`.
+- **`LookupHints`** — short keyword pointers ("topic and key terms")
+  to original event-log entries for facts that didn't fit. Consumers
+  re-query for detail. Pattern from Letta compaction prompt.
+
+Each section records:
+
+- `Distiller` — the prompt+model that produced it.
+- `GeneratedAt`, `EventsCoveredThrough` — per-section staleness.
+- `Provenance` — source events the section synthesizes from.
+- `TokenBudget` / `TokenCount` — actual size vs target (per-section
+  budgets; bundle total enforced post-composition using the LLM
+  tokenizer; pattern from LlamaIndex).
+
+### Distillation prompt patterns (ported)
+
+Several prompt-design conventions ported from leading systems. See
+`research-design-lessons.md` §3.2 + §3.3 for source citations.
+
+- **Observation-Date + Current-Date dual anchor** (Mem0
+  `prompts.py:528-536`). Every distillation prompt is told both the
+  observation date and the current date with an explicit instruction
+  to resolve relative references against the observation date only.
+- **"Capture transitions, not just states"** (Mem0
+  `prompts.py:611-622`). Prompts instruct the model to capture state
+  transitions ("switched from X to Y after Z") rather than only the
+  latest state.
+- **Self-contained-fact constraint** (Cognee). One leading sentence
+  stating what the input is about, followed by bullets of
+  self-contained facts — each bullet must survive mid-context
+  truncation.
+- **Integer-ID anti-hallucination** (Mem0 `main.py:715-722`). When
+  prompts embed existing event/fact IDs, pass sequential integers
+  (`0, 1, 2, ...`) as handles; map back to ULIDs after the call.
+  Prevents LLM ID hallucination.
+
+### Retrieval scoring (Phase 4 + Phase 11)
+
+When Phase 4 (FTS5 + structured) and Phase 11 (sqlite-vec) land,
+score fusion follows the Mem0 v3 pattern (ported from
+`mem0/utils/scoring.py`):
+
+- **All signals normalized to [0,1] higher-is-better BEFORE fusion**.
+  Pin this in test fixtures (Mem0 PR #5391 fixed multiple backends
+  shipping distance instead of similarity).
+- **Additive scoring with hard semantic threshold gate**:
+  `combined = (semantic + bm25 + entity_boost) / max_possible`,
+  excluding candidates with semantic below threshold (default 0.1).
+  BM25 cannot rescue a candidate with zero semantic match — this
+  was Mem0's +20 LoCoMo lesson.
+- **Query-length-adaptive BM25 sigmoid normalization** (Mem0
+  `get_bm25_params`). Five parameter sets for query lengths 1-3,
+  4-6, 7-9, 10-15, 15+. Tiny function, big quality lift.
+- **Entity-count popularity dampening** (Mem0
+  `main.py:1515-1517`): `weight = 1 / (1 + 0.001 * (n-1)^2)`
+  prevents widely-shared entities from dominating every query.
+- **Filter-first, vector-rank-second** (Pinecone). Apply
+  category/workstream/temporal/capability filters *before* the
+  vector search; otherwise top-k followed by filtering produces
+  empty results when filters are restrictive.
+
+### `Explain` flag for retrieval debugging
+
+`IMemoryQueryAPI.QueryAsync` accepts an `Explain: bool` parameter.
+When set, the result includes a `ScoreDetails` block per item:
+per-signal contributions (semantic, BM25, entity-boost, filter,
+capability resolution), gate decisions, and final fused score.
+Critical for diagnosing workstream-isolation bugs and temporal-window
+mistakes. Pattern from Mem0 `explain=True`.
 
 ### Capability-based query API (rubber-duck finding H)
 
@@ -236,29 +363,53 @@ Query types:
 - Semantic *(v2 — vector)*
 - Distillation (synthesize a bundle for X)
 
-### Conservative entity resolution (rubber-duck finding F)
+### Conservative entity resolution (three-tier)
 
-**Default: do not merge entities on surface similarity.**
+Updated from the original two-tier design per
+`research-design-lessons.md` §3.4 (three-tier strategy convergent
+across Mem0, Cognee, Graphiti).
 
-**Auto-merge** only when a deterministic key matches:
+**Tier 1: deterministic-key auto-merge (no LLM).** Compute UUID5
+from a fixed namespace + canonical key per entity type.
+Canonicalization spec per identity type:
 
-- Same UUID
-- Same stable external ID (Stripe customer ID, GitHub user login, Slack user ID)
-- Same canonical email domain on company-domain match (with explicit
-  per-domain whitelist)
+- Emails: lowercase + strip dots in localpart for `@gmail.com`.
+- GitHub login: as-is (case-sensitive per GitHub policy).
+- Stripe customer ID, Linear ID, Slack user ID: as-is.
+- Names: lowercase + collapse whitespace + strip leading/trailing
+  punctuation. **Names alone never auto-merge** — they're only used
+  in Tier 2/3 candidate generation.
 
-**Propose-merge** when:
+Pattern from Cognee `cognee/infrastructure/engine/models/DataPoint.py
+:72-110` (`_generate_identity_id`). ~40 lines of code; trivial port
+to C#.
 
-- LLM extractor finds two mentions plausibly the same
-- Two entities have overlapping name + matching workstream context
+**Tier 2: embedding-similarity threshold (no LLM).** When no
+deterministic key is available, compute cosine similarity of
+candidate name+description embeddings; merge if ≥0.95 cosine.
+Threshold matches Mem0 `main.py:919`. **This tier requires Phase 11
+(vector search) to be live**; it's a no-op in v1.
 
-Proposed merges go to `EntityMergeProposal` table; surfaced to human via the
-cockpit. Confirmed merges become events (`entity.merged`) with audit trail.
-Split events also supported (`entity.split`) for unwinding bad merges.
+**Tier 3: LLM-propose + human-confirm.** LLM scores possible merges
+not handled by Tier 1/2; high-confidence proposals surface to a
+human (or MCP elicitation) for confirmation. Port Graphiti
+`dedupe_nodes.py` prompt. Confirmation API re-cites pre-merge
+canonical names exactly; mismatch returns `StaleProposalError`
+(pattern from Letta `core_memory_replace`).
 
-Why this matters: bad merges poison memory. Once you've conflated two
-customers, your facts about them are permanently wrong; untangling requires
-event replay.
+**Popularity dampening** (all tiers): per Mem0 pattern, apply
+quadratic weight = `1 / (1 + 0.001 * (n-1)^2)` where n is the
+mention count. Prevents widely-shared entities ("john.smith")
+dominating fuzzy matches forever.
+
+Proposed merges go to `EntityMergeProposal` table; surfaced via the
+cockpit (or MCP elicitation when stateful HTTP). Confirmed merges
+become events (`entity.merged`) with audit trail. Split events also
+supported (`entity.split`) for unwinding bad merges.
+
+Why this matters: bad merges poison memory. Once you've conflated
+two customers, your facts about them are permanently wrong;
+untangling requires event replay.
 
 ### Outcome closure (rubber-duck finding 7)
 
@@ -273,6 +424,147 @@ When the wedge emits `action.executed` (e.g., PR opened), memory agent:
 Manual marking: cockpit UI lets human mark outcomes for actions where
 automated watching isn't possible.
 
+### Human-in-the-loop curation (Phase 6.5 — Mneme differentiator)
+
+Most memory systems treat curation as destructive (`UPDATE` / `DELETE`).
+Mem0, Letta, Cognee, and Zep all support confirm/revoke at best, with no
+audit trail of who edited what. **Mneme treats curation as a first-class
+workflow** built on the same append-only event log everything else uses.
+
+**Principles:**
+
+1. **Every curation is an append-only event.** Never mutate projections
+   or artifacts in place. The projector applies the curation event the
+   next time it runs.
+2. **Stale-state guard everywhere.** Every curation API requires the
+   caller to cite the pre-curation state (hash of the canonical form).
+   If another curator advanced the state in the meantime, the call
+   fails with `StaleProposalError`. Pattern from Letta
+   `core_memory_replace` (`base.py:262-280`).
+3. **Bi-temporal preserving.** `fact.amended` carries `valid_at` so
+   point-in-time queries can still answer "what did we believe on date
+   X" vs. "what do we now know about date X." Curation does not
+   rewrite history; it adds a new chapter.
+4. **Capability-scoped.** `CurationCapability` is a separate token type
+   from `IngestCapability` / `QueryCapability`. An agent with ingest
+   rights cannot curate by default.
+5. **Audit by default.** A `CurationLog` projection answers "who
+   curated what, when, with what rationale" — GDPR Article 30 falls
+   out for free.
+
+**`IMemoryCurator` interface (Phase 0 contract, Phase 6.5 impl):**
+
+```csharp
+public interface IMemoryCurator
+{
+    // Correct a fact's content; carries pre-state hash for stale guard.
+    Task<CurationResult> AmendFactAsync(
+        FactId target,
+        string preStateHash,
+        FactAmendment amendment,
+        CurationCapability cap,
+        CancellationToken ct = default);
+
+    // Attach human commentary without changing content.
+    Task<CurationResult> AnnotateAsync(
+        EventId target,
+        string commentary,
+        CurationCapability cap,
+        CancellationToken ct = default);
+
+    // Boost retrieval weight (default multiplier 2.0).
+    Task<CurationResult> PinAsync(
+        EventId target,
+        PinScope scope,
+        float weightMultiplier,
+        CurationCapability cap,
+        CancellationToken ct = default);
+
+    // Suppress retrieval weight (default multiplier 0.3).
+    Task<CurationResult> DemoteAsync(
+        EventId target,
+        float weightMultiplier,
+        CurationCapability cap,
+        CancellationToken ct = default);
+
+    // Distillation aggregated wrong — break a fact into parts.
+    Task<CurationResult> SplitFactAsync(
+        FactId source,
+        IReadOnlyList<FactSplitPart> parts,
+        string preStateHash,
+        CurationCapability cap,
+        CancellationToken ct = default);
+
+    // Two facts say the same thing — combine them.
+    Task<CurationResult> MergeFactsAsync(
+        IReadOnlyList<FactId> sources,
+        FactMerged target,
+        string preStateHash,
+        CurationCapability cap,
+        CancellationToken ct = default);
+
+    // Reverse a prior curation (appends an inverse event).
+    Task<CurationResult> RevertCurationAsync(
+        EventId curationEventId,
+        string reason,
+        CurationCapability cap,
+        CancellationToken ct = default);
+}
+```
+
+**New event types** (added to `EventChannel.Epistemic`, flagged
+`IsCurationAction = true` for `CurationLog` projection):
+
+| Event type | Meaning | Reversible via |
+|---|---|---|
+| `fact.amended` | Content correction; old fact superseded but still queryable bi-temporally | `RevertCurationAsync` |
+| `fact.annotated` | Human commentary attached to event | `RevertCurationAsync` |
+| `fact.pinned` | Retrieval weight multiplied (default 2.0) | `fact.demoted` or `RevertCurationAsync` |
+| `fact.demoted` | Retrieval weight multiplied (default 0.3) | `fact.pinned` or `RevertCurationAsync` |
+| `fact.split` | One fact declared as N facts; original marked superseded | `fact.merged` (manual) or `RevertCurationAsync` |
+| `fact.merged` | N facts declared as one; sources marked superseded | `fact.split` (manual) or `RevertCurationAsync` |
+| `curation.reverted` | Inverse of a prior curation; records the reverted event-id | (no further inverse) |
+
+**Pre-distillation review queue** (opt-in per workstream): for
+sensitive workstreams, set `WorkstreamMode = ReviewBeforeDistill`.
+Distillation worker skips events in those workstreams until they pass
+through `IReviewQueue.ApproveAsync`. Default mode is `AutoDistill`
+(today's behavior).
+
+**Scoring integration** (Phase 4): retrieval scoring picks up pin /
+demote multipliers from the `entity_curation_weights` projection.
+Multiplier applied **after** the additive-with-gate fusion but
+**before** the threshold check — so a demoted fact still has to pass
+the semantic threshold to be returned at all (preventing demotion from
+silently zeroing-out the index).
+
+**Distiller integration** (Phase 5): the distillation worker MUST
+honor `fact.pinned` (always include in the next bundle) and
+`fact.demoted` (place in `LookupHints`, not the main sections, unless
+the user explicitly queries for it).
+
+**MCP exposure** (Phase 8): `improve` MCP tool dispatches to the
+relevant `IMemoryCurator` operation based on an `operation` parameter
+(`amend`, `annotate`, `pin`, `demote`, `split`, `merge`, `revert`).
+`mneme://workstream/{id}/curation-log` and
+`mneme://workstream/{id}/review-queue` are subscribable resources so
+a curation UI updates live. Elicitation flow: an agent that wants to
+curate triggers `elicitation/create` with the proposed change; the
+user confirms in the cockpit; the curator API is called with the
+confirmed proposal.
+
+**Why this is a differentiator:**
+
+| System | Amend | Annotate | Pin | Demote | Split | Merge | Audit log |
+|---|---|---|---|---|---|---|---|
+| Mem0 | UPDATE (destructive) | — | — | — | — | — | — |
+| Letta | exact-string replace | — | — | — | — | — | `BlockHistory` (block-only) |
+| Cognee | — | — | — | — | — | — | — |
+| Zep / Graphiti | — | — | — | — | — | LLM auto | — |
+| **Mneme** | ✓ event | ✓ event | ✓ event | ✓ event | ✓ event | ✓ event + propose-confirm | ✓ `CurationLog` projection |
+
+See `backlog.md` Phase 7.5 for the full task breakdown.
+
 ### Memory agent process model
 
 - **Embedded** *(v1 default)*: runs in cockpit process; same SQLite file;
@@ -281,10 +573,122 @@ automated watching isn't possible.
   shared SQLite or separate
 - **Service** *(v2+)*: hosted; shared by multiple cockpit users; mTLS auth
 
-**Pluggable LLM provider**: classifier + distillation LLM is configured
-per-deployment. Local llama, OpenAI, Anthropic, Azure OpenAI, etc. Defaults
-to a small local model in embedded mode (no network egress); cloud in
-sidecar / service.
+**Pluggable LLM provider**: classifier + distillation LLM is
+configured per-deployment via **`Microsoft.Extensions.AI.IChatClient`**
+(supersedes earlier Semantic Kernel plan — see
+`research-design-lessons.md` §2.15 + §4.7). Local llama, OpenAI,
+Anthropic, Azure OpenAI, etc. — register any
+`IChatClient` implementation. Defaults to a small local model in
+embedded mode (no network egress); cloud in sidecar / service.
+`Mneme/Llm/` depends only on
+`Microsoft.Extensions.AI.Abstractions ≥ 10.4.0`.
+
+### Observability (Phase 1+)
+
+Mneme ships with OpenTelemetry from Phase 1 using GenAI Semantic
+Conventions v1.37 (aligning with MAF's `OpenTelemetryAgent`). Pattern
+from Cognee `tracing.py`; see `research-design-lessons.md` §3.8.
+
+**Activation guard**: when tracing is disabled, all span creation
+goes through `MnemeNullSpan` — zero allocation, zero overhead. Default
+builds pay nothing.
+
+**Span name taxonomy**:
+
+- `mneme.ingest.event` — sync ingest path (validate → redact → WAL).
+- `mneme.classify.run` — classifier LLM call.
+- `mneme.redactor.run` — secret-redaction pass.
+- `mneme.entity.resolve` — entity resolution (tag
+  `method = deterministic | embedding | llm-proposed | human-confirmed`).
+- `mneme.distill.run` — distillation worker run (tags: input/output
+  tokens, bundle size, workstream).
+- `mneme.projection.rebuild` — projection rebuild from event log.
+- `mneme.query.execute` — query API call (tags: signal count,
+  gated_count, capability check).
+
+**MCP spans** (Phase 8): set `mcp.method.name`, `gen_ai.tool.name`,
+`mcp.session.id`, `network.transport` per MAF Python PR `dcc218d`
+(2026-06-05).
+
+**Secret-redaction at span-attribute write time** (not at log emission).
+Apply `IRedactor` to all attribute values inline at emission — port
+Cognee's regex set verbatim.
+
+**Per-fact provenance** (already in plan): every derived item records
+`{source_event_ids, agent_id, model, prompt_hash}`. Surfaced in
+`QueryResult.Provenance` and in OTEL span attributes.
+
+**In-memory trace buffer** (developer ergonomic): `IMneme.GetLastDistillationTrace()`
+returns a structured summary of the most recent distillation —
+`{operation, total_duration_ms, span_count, breakdown_by_span_name,
+errors}`. Highly valuable when developing consumer agents against
+an embedded library. Pattern from Cognee `CogneeSpanExporter`
+circular buffer.
+
+### MAF integration — `Mneme.Agents.AI` package (Phase 8.5)
+
+The MAF integration seam is `MessageAIContextProvider` (abstract
+class in `Microsoft.Agents.AI.Abstractions`) — **not** a custom
+`IMemoryStore` interface. See `research-design-lessons.md` §2.15
+for the source-level analysis.
+
+`Mneme.Agents.AI` (Phase 8.5 NuGet package) ships:
+
+- **`MnemeContextProvider : MessageAIContextProvider`** — drop-in
+  context injection. `ProvideMessagesAsync` returns Mneme's
+  distillation bundle as a single
+  `ChatMessage(ChatRole.System, bundle.ToMarkdown())`.
+  `StoreAIContextAsync` ingests `RequestMessages` + `ResponseMessages`
+  back into Mneme.
+- **`MnemeCheckpointStore : ICheckpointStore<JsonElement>`** —
+  durable MAF workflow checkpoints backed by `memory_events` (event
+  channel = `Technical`, see `EventChannel` below). Three-method
+  interface; clean integration.
+- **`AddMneme(opts => { opts.WorkstreamId = "..."; opts.SqlitePath
+  = "..."; })`** — developer-ergonomic registration that hides
+  capability-token mechanics for the 90% case. Full `CapabilityToken`
+  API remains available for multi-workstream scenarios.
+
+State surviving session serialization lives in
+`AgentSession.StateBag.GetValue<MnemeState>("MnemeContextProvider")`
+— the StateBag is the persistence carrier across service restarts.
+
+**Capability token via `AdditionalProperties`**: MAF has no native
+auth slot; the sanctioned propagation channel is
+`AgentRunOptions.AdditionalProperties["mneme:capability-token"]`,
+read inside `ProvideMessagesAsync` via
+`AIAgent.CurrentRunContext?.RunOptions?.AdditionalProperties`.
+
+### `EventChannel` — Epistemic vs Technical events
+
+To keep the 7 epistemic categories pure, the event schema gains an
+`EventChannel` discriminator:
+
+- **`Epistemic`** — Evidence, Facts, Decisions, Hypotheses, Goals,
+  Actions, Outcomes. The substance of agent memory; included in
+  queries by default.
+- **`Technical`** — workflow checkpoints (MAF), distillation job
+  records, projection-rebuild markers, internal bookkeeping.
+  Excluded from `IMemoryQueryAPI` results unless the capability
+  token explicitly grants `IncludeTechnical = true`.
+
+Without this distinction, MAF's `MnemeCheckpointStore` writes
+pollute epistemic queries with workflow JSON blobs.
+
+### Benchmarks — LoCoMo + LongMemEval (Phase 4.5)
+
+Mneme has no published benchmarks yet; competitor credibility (Mem0
+92.5 LoCoMo / 94.4 LongMemEval) comes from numbers. Phase 4.5 (after
+queryable Phase 4 lands) runs both benchmarks against Mneme.
+
+**Expected outcome**: Mneme should **win the temporal subcategory of
+LoCoMo** specifically — bi-temporal modeling is the architectural
+advantage. If Mneme doesn't beat single-timestamp competitors on
+temporal queries, something is wrong with the implementation.
+
+Results published in the same form as Mem0's
+`github.com/mem0ai/memory-benchmarks` — both leaderboard numbers and
+the harness scripts. See `research-design-lessons.md` §4.8.
 
 ### Sync model (rubber-duck finding G — idempotent append-only, NOT LWW)
 
@@ -351,19 +755,50 @@ in spool until memory recovers.
 
 **Phase 4 — Distillation pipeline** *(~2 wks)*
 - Extraction (events → facts / entities / hypotheses / goals candidates)
-- Workstream context bundle synthesis
+- Workstream context bundle synthesis (two-tier `BundleIndex` + `BundleSection`)
 - Decision rationale synthesis
 - Distillation cache + invalidation
+- **Sync/async split** (sync `Ingest` returns <50ms; `DistillationJob`
+  worker runs extract+resolve+project+synthesize+index asynchronously)
+- Bundle staleness contract (`GeneratedAt`, `EventsCoveredThrough`,
+  `ForceRefresh`)
+- Per-workstream pessimistic SQLite lock for the worker
+- `Explain` flag on `QueryAsync` returning per-signal score decomposition
 
-**Phase 5 — Conservative entity resolution** *(~1 wk)*
-- LLM-proposed merges with quality scoring
-- Merge proposal table + confirm / reject API
+**Phase 4.5 — Benchmarks: LoCoMo + LongMemEval** *(~3 days)*
+- Run both benchmarks against the queryable Phase 4 stack
+- Publish results (leaderboard numbers + harness scripts)
+- **Expected**: Mneme wins the temporal subcategory of LoCoMo
+
+**Phase 5 — Conservative entity resolution (three-tier)** *(~1.5 wks)*
+- Tier 1: deterministic UUID5 auto-merge (per-identity-type canonicalization spec)
+- Tier 2: embedding similarity ≥0.95 (no-op until Phase 11)
+- Tier 3: LLM-propose (Graphiti `dedupe_nodes.py` prompt) + human/elicitation confirm
+- Merge proposal table + confirm / reject API (stale-proposal guard)
 - `entity.merged` / `entity.split` events with audit
+- Popularity dampening (`weight = 1 / (1 + 0.001 * (n-1)^2)`)
 
 **Phase 6 — Outcome closure** *(~1 wk)*
 - Per-source outcome watchers (GitHub PR, Email thread, Linear ticket, etc.)
 - Outcome → action → decision linking
 - Manual outcome marking API
+
+**Phase 6.5 — HITL Curation surface** *(~1.5 wks)*
+- `IMemoryCurator` interface: `amend`, `annotate`, `pin`, `demote`,
+  `split`, `merge`, `revert` — all append-only events
+- `CurationCapability` token (separate from ingest/query capabilities)
+- Stale-state guard on every mutation (Letta `core_memory_replace`
+  pattern: caller cites pre-state hash, fail-on-mismatch)
+- New event types: `fact.amended`, `fact.annotated`, `fact.pinned`,
+  `fact.demoted`, `fact.split`, `fact.merged`, `curation.reverted`
+- `CurationLog` projection (GDPR Article 30 falls out for free)
+- `IReviewQueue` for opt-in pre-distillation review per workstream
+- Pin / demote multipliers wired into Phase 4 retrieval scoring (after
+  fusion, before threshold gate)
+- Distiller honors pins (always include) and demotions (route to
+  `LookupHints`)
+- Differentiator vs. Mem0/Letta/Cognee/Zep (none ship comparable
+  curation surfaces)
 
 **Phase 7 — Revocation + retention** *(~3 days)*
 - Content tombstone mechanism
@@ -375,6 +810,16 @@ in spool until memory recovers.
 - Cloud snapshot upload (S3-compatible)
 - Delta sync (since last sequence)
 - Conflict handling (idempotent insert; projection rebuild)
+
+**Phase 8.5 — `Mneme.Agents.AI` MAF integration package** *(~1 wk)*
+- `MnemeContextProvider : MessageAIContextProvider` (drop-in MAF
+  context injection)
+- `MnemeCheckpointStore : ICheckpointStore<JsonElement>` (durable
+  MAF workflow checkpoints in `memory_events` as `EventChannel = Technical`)
+- `AddMneme(opts => ...)` developer-ergonomic registration
+- Capability token via `AgentRunOptions.AdditionalProperties
+  ["mneme:capability-token"]`
+- Demo + README comparing against `Microsoft.Agents.AI.Mem0` package
 
 **Phase 9 — Process separation (Sidecar)** *(~1 wk)*
 - gRPC contract
@@ -402,7 +847,10 @@ Phase 1 contracts land.)
 7. **Memory agent classifier accuracy** — over-capture / under-capture.
    Mitigation: deterministic capture in v1 (driven by cockpit, no autonomy);
    autonomous adds in v2 via review queue (human confirms before persist);
-   manual "memorize this" / "forget this" always available.
+   manual "memorize this" / "forget this" always available; **richer
+   curation via `IMemoryCurator` from Phase 6.5 (amend / pin / demote /
+   split / merge / revert) when over/under-capture is detected after the
+   fact**.
 8. **Secret redaction false negatives** — novel formats slip through.
    Mitigation: redactor runs at capture AND on retrieval; pluggable regex
    sets; "scrub" command for retro-redaction.
@@ -468,9 +916,11 @@ Framework, MS Kernel Memory, KurrentDB, Marten, Neo4j .NET driver.
 | Library | License | Purpose |
 |---|---|---|
 | `Microsoft.Data.Sqlite` | MIT | Event log + temporal graph storage |
-| `Microsoft.SemanticKernel` or MAF | MIT | Pluggable LLM provider abstraction |
+| `Microsoft.Extensions.AI.Abstractions` (≥10.4.0) | MIT | LLM provider abstraction (`IChatClient`). **Supersedes Semantic Kernel choice** — see `research-design-lessons.md` §2.15 + §4.7. |
+| `Microsoft.Agents.AI` + `.Abstractions` *(Phase 8.5 only)* | MIT | `MessageAIContextProvider` + `ICheckpointStore<JsonElement>` base types for `Mneme.Agents.AI` integration package. |
 | `ModelContextProtocol` (C# SDK) | Apache 2.0 | Memory agent exposed as MCP server |
 | `sqlite-vec` *(v2 only)* | Apache 2.0 | Vector search extension |
+| OpenTelemetry .NET *(observability)* | Apache 2.0 | GenAI Semantic Conventions v1.37 spans |
 
 **Substrate decisions:**
 
@@ -483,10 +933,14 @@ Framework, MS Kernel Memory, KurrentDB, Marten, Neo4j .NET driver.
 - **Temporal graph**: SQL tables with `valid_from` / `valid_until` columns.
   Point-in-time queries are standard WHERE clauses. Neo4j .NET driver is
   available as a v2+ upgrade if graph query complexity outgrows SQL.
-- **LLM provider**: Semantic Kernel / MAF for abstraction. Local model
-  (llama / ollama) is the v1 default for embedded deployment; user can
-  configure cloud (OpenAI / Anthropic / Azure) via standard SK provider
-  registration.
+- **LLM provider**: `Microsoft.Extensions.AI.IChatClient`
+  (`Microsoft.Extensions.AI.Abstractions ≥ 10.4.0`) is the LLM
+  abstraction. Aligns with MAF (`Microsoft.Agents.AI`) which uses
+  the same; **supersedes the earlier Semantic Kernel choice**
+  (`research-design-lessons.md` §2.15 + §4.7). Local model
+  (llama / ollama via `IChatClient`) is the v1 default for embedded
+  deployment; user can configure cloud (OpenAI / Anthropic / Azure)
+  via any `IChatClient` provider.
 - **MCP exposure**: memory agent runs an MCP server so any ACP agent (and
   external Copilot / Claude / Cursor) can query it via standard MCP tool
   calls — no MuxiMuxi-specific client needed.
