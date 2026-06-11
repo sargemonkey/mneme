@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Mneme\Mneme.csproj" />
+    <ProjectReference Include="..\..\src\Mneme.Mcp\Mneme.Mcp.csproj" />
   </ItemGroup>
 
 </Project>
