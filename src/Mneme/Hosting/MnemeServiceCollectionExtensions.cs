@@ -99,7 +99,8 @@ public static class MnemeServiceCollectionExtensions
         services.TryAddSingleton<IMemoryQueryAPI>(sp => new MemoryQueryApi(
             sp.GetRequiredService<SqliteConnectionFactory>(),
             sp.GetRequiredService<TextSearchService>(),
-            sp.GetRequiredService<TimeProvider>()));
+            sp.GetRequiredService<TimeProvider>(),
+            sp.GetService<IDistiller>()));
         services.TryAddSingleton<IMemoryCurator>(sp => new SqliteMemoryCurator(
             sp.GetRequiredService<SqliteConnectionFactory>(),
             sp.GetRequiredService<TimeProvider>()));

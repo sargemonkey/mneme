@@ -114,7 +114,7 @@ public sealed class MnemeMcpToolsTests : IDisposable
     }
 
     [Fact]
-    public async Task Distill_returns_degraded_bundle_marker()
+    public async Task Distill_returns_heuristic_bundle_when_no_distiller_registered()
     {
         using var sp = Build();
         var agent = sp.GetRequiredService<IMemoryAgent>();
@@ -122,8 +122,8 @@ public sealed class MnemeMcpToolsTests : IDisposable
         var token = sp.GetRequiredService<CapabilityToken>();
         await MnemeMcpTools.Remember(agent, token, eventId: "mcp-dist-1", content: "x");
         var json = await MnemeMcpTools.Distill(api, token);
-        Assert.Contains("\"is_stale\": true", json);
-        Assert.Contains("not yet running", json);
+        Assert.Contains("\"is_stale\": false", json);
+        Assert.Contains("Heuristic synthesis", json);
     }
 
     [Fact]

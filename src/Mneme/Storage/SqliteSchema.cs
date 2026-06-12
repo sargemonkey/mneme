@@ -27,7 +27,7 @@ namespace Mneme.Storage;
 public static class SqliteSchema
 {
     /// <summary>Current schema version. Bumped when the DDL changes incompatibly.</summary>
-    public const int Version = 4;
+    public const int Version = 5;
 
     /// <summary>
     /// Idempotently create all Phase 1 tables, indexes, and the
@@ -317,5 +317,20 @@ public static class SqliteSchema
             ON curation_events(workstream_id, occurred_at);
         CREATE INDEX IF NOT EXISTS idx_curation_events_curator
             ON curation_events(curator, occurred_at);
+
+        -- Phase 5 — distillation cache. One row per workstream holds the
+        -- latest synthesized ContextBundle. The cache is invalidated by
+        -- comparing events_covered_through against the newest event id
+        -- in memory_events; staleness is computed at read time so we
+        -- never serve a bundle that doesn't honor the most recent
+        -- curation.
+        CREATE TABLE IF NOT EXISTS distillation_cache (
+            workstream_id           TEXT NOT NULL PRIMARY KEY,
+            bundle_json             TEXT NOT NULL,
+            events_covered_through  TEXT NOT NULL,
+            generated_at            TEXT NOT NULL,
+            distiller               TEXT NOT NULL,
+            token_count             INTEGER NOT NULL
+        ) WITHOUT ROWID;
         """;
 }

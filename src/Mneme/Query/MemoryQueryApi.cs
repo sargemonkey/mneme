@@ -47,13 +47,20 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
     private readonly SqliteConnectionFactory _connections;
     private readonly TextSearchService _search;
     private readonly TimeProvider _clock;
+    private readonly IDistiller? _distiller;
+    private readonly Mneme.Distillation.DistillationRequestBuilder _requestBuilder;
+    private readonly Mneme.Distillation.DistillationCache _cache;
 
     /// <summary>Construct against the shared connection factory + text search service.</summary>
     public MemoryQueryApi(SqliteConnectionFactory connections, TextSearchService search)
-        : this(connections, search, TimeProvider.System) { }
+        : this(connections, search, TimeProvider.System, distiller: null) { }
 
     /// <summary>Construct with a custom clock (tests).</summary>
     public MemoryQueryApi(SqliteConnectionFactory connections, TextSearchService search, TimeProvider clock)
+        : this(connections, search, clock, distiller: null) { }
+
+    /// <summary>Construct with everything including an optional <see cref="IDistiller"/>.</summary>
+    public MemoryQueryApi(SqliteConnectionFactory connections, TextSearchService search, TimeProvider clock, IDistiller? distiller)
     {
         ArgumentNullException.ThrowIfNull(connections);
         ArgumentNullException.ThrowIfNull(search);
@@ -61,6 +68,9 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
         _connections = connections;
         _search = search;
         _clock = clock;
+        _distiller = distiller;
+        _requestBuilder = new Mneme.Distillation.DistillationRequestBuilder(connections);
+        _cache = new Mneme.Distillation.DistillationCache(connections);
     }
 
     /// <inheritdoc/>
@@ -104,37 +114,72 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
     }
 
     /// <inheritdoc/>
-    public Task<ContextBundle> DistillAsync(WorkstreamId workstream, DistillOptions options, CapabilityToken token, CancellationToken ct = default)
+    public async Task<ContextBundle> DistillAsync(WorkstreamId workstream, DistillOptions options, CapabilityToken token, CancellationToken ct = default)
     {
         WorkstreamIdValidator.EnsureValid(workstream.Value, nameof(workstream));
         _ = CapabilityEnforcement.Enforce(token, workstream, null, EventChannel.Epistemic, _clock.GetUtcNow());
 
-        // Phase 4 ships a degraded bundle: the worker that produces real
-        // synthesis lands in Phase 5. Consumers see a clear "no synthesis
-        // available" Orientation; the shape is final so callers can
-        // start integrating today.
         var now = _clock.GetUtcNow();
-        var lastEventId = GetLastEventId(workstream) ?? EventId.None;
-        return Task.FromResult(new ContextBundle(
-            Workstream: workstream,
-            Orientation: new OrientationSummary(
-                Paragraph: "No synthesis available — the distillation worker (Phase 5) is not yet running. " +
-                           "Use QueryAsync / ListRecentAsync for raw access in the meantime.",
-                Distiller: Distiller,
-                GeneratedAt: now,
-                EventsCoveredThrough: lastEventId),
-            Index: new BundleIndex(
-                Distiller: Distiller,
-                TokenBudget: options.TokenBudget ?? 0,
-                TokenCount: 0,
-                GeneratedAt: now,
-                EventsCoveredThrough: lastEventId,
-                SectionRefs: Array.Empty<BundleSectionRef>()),
+        var budget = options.TokenBudget ?? 4096;
+
+        // Cache hit?
+        if (!options.ForceRefresh)
+        {
+            var cached = _cache.TryLoad(workstream);
+            if (cached is not null && _cache.IsFresh(workstream, cached))
+            {
+                return cached;
+            }
+        }
+
+        var request = _requestBuilder.Build(workstream, budget, _cache.TryLoad(workstream), now);
+
+        if (request.Events.Count == 0)
+        {
+            return EmptyBundle(workstream, request.EventsCoveredThrough, now, budget);
+        }
+
+        ContextBundle bundle;
+        if (_distiller is null)
+        {
+            // No host distiller registered — surface the degraded fallback
+            // so consumers see a working (if mechanical) bundle and a
+            // clear hint about how to upgrade.
+            bundle = Mneme.Distillation.DistillationPromptBuilder.BuildHeuristicBundle(request);
+        }
+        else
+        {
+            bundle = await _distiller.DistillAsync(request, ct).ConfigureAwait(false);
+            // Stamp the distiller id on the bundle even if the host's
+            // distiller forgot to.
+            bundle = bundle with
+            {
+                Orientation = bundle.Orientation with { Distiller = _distiller.Id },
+                Index = bundle.Index with { Distiller = _distiller.Id },
+            };
+        }
+
+        _cache.Save(workstream, bundle);
+        return bundle;
+    }
+
+    private static ContextBundle EmptyBundle(WorkstreamId ws, EventId covered, DateTimeOffset now, int budget)
+    {
+        var distillerId = "mneme/empty";
+        var orientation = new OrientationSummary(
+            Paragraph: "Workstream is empty — nothing to distill yet.",
+            Distiller: distillerId,
+            GeneratedAt: now,
+            EventsCoveredThrough: covered);
+        return new ContextBundle(
+            Workstream: ws,
+            Orientation: orientation,
+            Index: new BundleIndex(distillerId, budget, 0, now, covered, Array.Empty<BundleSectionRef>()),
             Sections: Array.Empty<BundleSection>(),
             Hints: new LookupHints(Array.Empty<LookupHint>()),
             GeneratedAt: now,
-            EventsCoveredThrough: lastEventId,
-            IsStale: true));
+            EventsCoveredThrough: covered,
+            IsStale: false);
     }
 
     /// <inheritdoc/>

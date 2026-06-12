@@ -160,7 +160,7 @@ public sealed class MemoryQueryApiTests : IDisposable
     }
 
     [Fact]
-    public async Task Distill_returns_degraded_bundle_until_phase5()
+    public async Task Distill_without_distiller_falls_back_to_heuristic_bundle()
     {
         var (sp, agent, query, token) = BuildHost(workstream: "q-dist");
         using var _ = sp;
@@ -168,11 +168,15 @@ public sealed class MemoryQueryApiTests : IDisposable
 
         var bundle = await query.DistillAsync(new WorkstreamId("q-dist"),
             new DistillOptions(), token);
-        Assert.True(bundle.IsStale);
+        // No host IDistiller registered → SDK assembles the heuristic
+        // fallback (still a complete ContextBundle, just no LLM prose).
+        Assert.False(bundle.IsStale);
         Assert.Equal("q-dist", bundle.Workstream.Value);
-        Assert.Empty(bundle.Sections);
-        Assert.Contains("not yet running", bundle.Orientation.Paragraph);
+        Assert.Single(bundle.Sections);
+        Assert.Equal(EpistemicCategory.Evidence, bundle.Sections[0].Category);
+        Assert.Contains("d-001", bundle.Sections[0].Content);
         Assert.Equal("d-001", bundle.EventsCoveredThrough.Value);
+        Assert.Contains("Heuristic synthesis", bundle.Orientation.Paragraph);
     }
 
     [Fact]
