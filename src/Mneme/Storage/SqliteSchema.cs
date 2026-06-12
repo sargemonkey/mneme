@@ -27,7 +27,7 @@ namespace Mneme.Storage;
 public static class SqliteSchema
 {
     /// <summary>Current schema version. Bumped when the DDL changes incompatibly.</summary>
-    public const int Version = 5;
+    public const int Version = 6;
 
     /// <summary>
     /// Idempotently create all Phase 1 tables, indexes, and the
@@ -332,5 +332,66 @@ public static class SqliteSchema
             distiller               TEXT NOT NULL,
             token_count             INTEGER NOT NULL
         ) WITHOUT ROWID;
+
+        -- Phase 6 — entity resolution. entity_index holds the
+        -- canonical entities; entity_mentions binds each mention back
+        -- to its source event; entity_merges records confirmed merges;
+        -- entity_merge_proposals holds Tier 3 LLM proposals pending
+        -- human confirmation.
+
+        CREATE TABLE IF NOT EXISTS entity_index (
+            entity_id       TEXT NOT NULL PRIMARY KEY,
+            workstream_id   TEXT NOT NULL,
+            kind            INTEGER NOT NULL,
+            canonical_key   TEXT NOT NULL,
+            display_name    TEXT NOT NULL,
+            first_seen_at   TEXT NOT NULL,
+            last_seen_at    TEXT NOT NULL,
+            mention_count   INTEGER NOT NULL DEFAULT 0
+        ) WITHOUT ROWID;
+        CREATE INDEX IF NOT EXISTS idx_entity_index_workstream
+            ON entity_index(workstream_id, kind);
+        CREATE INDEX IF NOT EXISTS idx_entity_index_canonical
+            ON entity_index(workstream_id, kind, canonical_key);
+
+        CREATE TABLE IF NOT EXISTS entity_mentions (
+            entity_id           TEXT NOT NULL,
+            event_id            TEXT NOT NULL,
+            asserted_display    TEXT NOT NULL,
+            at                  TEXT NOT NULL,
+            PRIMARY KEY (entity_id, event_id),
+            FOREIGN KEY (entity_id) REFERENCES entity_index(entity_id),
+            FOREIGN KEY (event_id) REFERENCES memory_events(event_id)
+        ) WITHOUT ROWID;
+        CREATE INDEX IF NOT EXISTS idx_entity_mentions_event
+            ON entity_mentions(event_id);
+
+        CREATE TABLE IF NOT EXISTS entity_merges (
+            winner_id       TEXT NOT NULL,
+            loser_id        TEXT NOT NULL,
+            confirmed_by    TEXT NOT NULL,
+            confirmed_at    TEXT NOT NULL,
+            rationale       TEXT NOT NULL,
+            PRIMARY KEY (winner_id, loser_id)
+        ) WITHOUT ROWID;
+        CREATE INDEX IF NOT EXISTS idx_entity_merges_loser
+            ON entity_merges(loser_id);
+
+        CREATE TABLE IF NOT EXISTS entity_merge_proposals (
+            proposal_id         TEXT NOT NULL PRIMARY KEY,
+            workstream_id       TEXT NOT NULL,
+            winner_id           TEXT NOT NULL,
+            loser_ids_json      TEXT NOT NULL,
+            confidence          REAL NOT NULL,
+            rationale           TEXT NOT NULL,
+            proposed_by         TEXT NOT NULL,
+            proposed_at         TEXT NOT NULL,
+            winner_state_hash   TEXT NOT NULL,
+            status              INTEGER NOT NULL DEFAULT 0,   -- 0=pending, 1=confirmed, 2=rejected
+            resolved_by         TEXT,
+            resolved_at         TEXT
+        ) WITHOUT ROWID;
+        CREATE INDEX IF NOT EXISTS idx_entity_merge_proposals_pending
+            ON entity_merge_proposals(workstream_id, status, proposed_at);
         """;
 }

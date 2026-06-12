@@ -9,6 +9,7 @@ using Mneme.Ingest.Redaction;
 using Mneme.Ingest.Validation;
 using Mneme.Projections;
 using Mneme.Query;
+using Mneme.Resolution;
 using Mneme.Revocation;
 using Mneme.Search;
 using Mneme.Storage;
@@ -107,6 +108,11 @@ public static class MnemeServiceCollectionExtensions
             sp.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton<ICurationLog>(sp => new SqliteCurationLog(
             sp.GetRequiredService<SqliteConnectionFactory>(),
+            sp.GetRequiredService<TimeProvider>()));
+        services.TryAddSingleton<EntityResolver>(sp => new EntityResolver(
+            sp.GetRequiredService<SqliteConnectionFactory>(),
+            sp.GetService<IEmbeddingProvider>(),
+            sp.GetService<IEntityProposer>(),
             sp.GetRequiredService<TimeProvider>()));
 
         // Capture pipeline: built only when a host registers an ICapturePolicy.
