@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/Mneme.Benchmarks/Mneme.Benchmarks.csproj" />
+  </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/Mneme.Samples.AgentHost/Mneme.Samples.AgentHost.csproj" />
   </Folder>

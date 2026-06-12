@@ -1,0 +1,24 @@
+{
+  "name": "sample-locomo-temporal",
+  "workstream": "bench-locomo-temporal",
+  "temporalNote": "Tests Mneme bi-temporal claim: probes use AsOf to query the state Mneme knew at a past instant.",
+  "turns": [
+    { "speaker": "alice", "at": "2026-01-15T10:00:00Z", "content": "I live in Berlin.",                          "category": "Fact" },
+    { "speaker": "alice", "at": "2026-01-15T10:01:00Z", "content": "My favorite restaurant is Lokal Mitte.",     "category": "Fact" },
+    { "speaker": "agent", "at": "2026-01-15T10:02:00Z", "content": "Got it.",                                    "shouldCapture": false },
+    { "speaker": "alice", "at": "2026-03-20T09:00:00Z", "content": "We decided to ship feature X in April.",     "category": "Decision" },
+    { "speaker": "alice", "at": "2026-05-10T14:00:00Z", "content": "I just moved to Munich.",                    "category": "Fact" },
+    { "speaker": "alice", "at": "2026-05-11T08:00:00Z", "content": "Looking for a new favorite restaurant here in Munich.", "category": "Goal" },
+    { "speaker": "alice", "at": "2026-06-01T16:30:00Z", "content": "We decided to ship feature X in May instead - team needs more time.", "category": "Decision" },
+    { "speaker": "alice", "at": "2026-06-05T11:00:00Z", "content": "New favorite restaurant: Tantris in Munich.","category": "Fact" }
+  ],
+  "probes": [
+    { "question": "where does alice live",        "expectedSubstring": "Munich" },
+    { "question": "favorite restaurant",          "expectedSubstring": "Tantris" },
+    { "question": "feature X shipping date",      "expectedSubstring": "May" },
+
+    { "question": "where does alice live",        "expectedSubstring": "Berlin",       "asOf": "2026-02-01T00:00:00Z" },
+    { "question": "feature X shipping date",      "expectedSubstring": "April",        "asOf": "2026-04-15T00:00:00Z" },
+    { "question": "favorite restaurant",          "expectedSubstring": "Lokal Mitte",  "asOf": "2026-04-15T00:00:00Z" }
+  ]
+}
