@@ -9,6 +9,7 @@
     <Project Path="src/Mneme.Contracts/Mneme.Contracts.csproj" />
     <Project Path="src/Mneme.Cli/Mneme.Cli.csproj" />
     <Project Path="src/Mneme.Mcp/Mneme.Mcp.csproj" />
+    <Project Path="src/Mneme.Sidecar/Mneme.Sidecar.csproj" />
     <Project Path="src/Mneme.Studio/Mneme.Studio.csproj" />
     <Project Path="src/Mneme.Studio.Desktop/Mneme.Studio.Desktop.csproj" />
     <Project Path="src/Mneme/Mneme.csproj" />
