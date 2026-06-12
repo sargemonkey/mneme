@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>Mneme.Agents.AI</PackageId>
+    <Title>Mneme.Agents.AI</Title>
+    <Description>Microsoft Agent Framework integration for Mneme. Drop-in MnemeContextProvider that hydrates Mneme's distilled context bundle into MAF agents.</Description>
+    <PackageTags>memory;agent;mneme;maf;microsoft-agent-framework;context-provider</PackageTags>
+    <Version>0.0.1-alpha.1</Version>
+    <IsPackable>true</IsPackable>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Agents.AI.Abstractions" Version="1.0.0-preview.251002.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Mneme\Mneme.csproj" />
+    <ProjectReference Include="..\Mneme.Contracts\Mneme.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\LICENSE" Pack="true" PackagePath="\" />
+    <None Include="..\..\NOTICE" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>
