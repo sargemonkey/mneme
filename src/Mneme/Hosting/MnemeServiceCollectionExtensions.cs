@@ -7,6 +7,7 @@ using Mneme.Curation;
 using Mneme.Ingest;
 using Mneme.Ingest.Redaction;
 using Mneme.Ingest.Validation;
+using Mneme.Outcomes;
 using Mneme.Projections;
 using Mneme.Query;
 using Mneme.Resolution;
@@ -81,7 +82,15 @@ public static class MnemeServiceCollectionExtensions
         services.TryAddSingleton<IClassifier, RuleBasedClassifier>();
         services.TryAddSingleton<TimeProvider>(TimeProvider.System);
         services.TryAddSingleton<ProjectorPipeline>(sp => new ProjectorPipeline(
-            sp.GetRequiredService<SqliteConnectionFactory>()));
+            sp.GetRequiredService<SqliteConnectionFactory>(),
+            new IProjector[]
+            {
+                new Mneme.Projections.Projectors.FactsProjector(),
+                new Mneme.Projections.Projectors.DecisionsProjector(),
+                new Mneme.Projections.Projectors.GoalsProjector(),
+                new Mneme.Projections.Projectors.HypothesesProjector(),
+                new DecisionChainsProjector(),
+            }));
         services.TryAddSingleton<TextSearchService>(sp => new TextSearchService(
             sp.GetRequiredService<SqliteConnectionFactory>()));
         services.AddSingleton<IIngestObserver>(sp => new ProjectorIngestObserver(
@@ -114,6 +123,12 @@ public static class MnemeServiceCollectionExtensions
             sp.GetService<IEmbeddingProvider>(),
             sp.GetService<IEntityProposer>(),
             sp.GetRequiredService<TimeProvider>()));
+        services.TryAddSingleton<FeedbackLearner>(sp => new FeedbackLearner(
+            sp.GetRequiredService<SqliteConnectionFactory>(),
+            sp.GetRequiredService<TimeProvider>()));
+        services.AddSingleton<IIngestObserver>(sp => new FeedbackIngestObserver(
+            sp.GetRequiredService<FeedbackLearner>(),
+            sp.GetRequiredService<SqliteConnectionFactory>()));
 
         // Capture pipeline: built only when a host registers an ICapturePolicy.
         // We register the CaptureSession factory unconditionally so consumers

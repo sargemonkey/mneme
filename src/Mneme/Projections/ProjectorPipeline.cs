@@ -66,7 +66,7 @@ public sealed class ProjectorPipeline
     {
         foreach (var p in _projectors)
         {
-            if (p.Category != envelope.Category) continue;
+            if (!p.MatchesCategory(envelope.Category)) continue;
             using var activity = MnemeActivitySource.Source.StartActivity(
                 MnemeActivitySource.ProjectionRebuild, ActivityKind.Internal);
             activity?.SetTag("mneme.projection.name", p.Name);

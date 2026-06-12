@@ -37,6 +37,15 @@ public interface IProjector
 
     /// <summary>Wipe and rebuild the projection table from genesis.</summary>
     int Rebuild(SqliteConnection c, SqliteTransaction tx);
+
+    /// <summary>
+    /// Returns true if this projector wants to see events in the given
+    /// category. Default is single-category match against <see cref="Category"/>;
+    /// projectors that span multiple categories (e.g., decision_chains
+    /// reads Decision/Action/Outcome) override this to broaden the
+    /// filter.
+    /// </summary>
+    bool MatchesCategory(EpistemicCategory category) => category == Category;
 }
 
 /// <summary>

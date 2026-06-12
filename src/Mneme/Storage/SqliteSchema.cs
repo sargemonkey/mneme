@@ -27,7 +27,7 @@ namespace Mneme.Storage;
 public static class SqliteSchema
 {
     /// <summary>Current schema version. Bumped when the DDL changes incompatibly.</summary>
-    public const int Version = 6;
+    public const int Version = 7;
 
     /// <summary>
     /// Idempotently create all Phase 1 tables, indexes, and the
@@ -393,5 +393,42 @@ public static class SqliteSchema
         ) WITHOUT ROWID;
         CREATE INDEX IF NOT EXISTS idx_entity_merge_proposals_pending
             ON entity_merge_proposals(workstream_id, status, proposed_at);
+
+        -- Phase 7 — Outcome closure. decision_chains projects the
+        -- Decision → Action → Outcome cause chain for retrieval and
+        -- learning. Polarity is denormalised from the outcome payload
+        -- so the chain is queryable without a payload re-parse.
+        -- Foreign keys are intentionally NOT declared on
+        -- decision_event_id / action_event_id / outcome_event_id —
+        -- events can arrive in any order (Action before its Decision is
+        -- a normal case), so the chain rows must be allowed to reference
+        -- event ids that have not yet landed.
+        CREATE TABLE IF NOT EXISTS decision_chains (
+            workstream_id       TEXT NOT NULL,
+            decision_event_id   TEXT NOT NULL,
+            action_event_id     TEXT,
+            outcome_event_id    TEXT,
+            outcome_polarity    INTEGER,
+            decision_at         TEXT NOT NULL,
+            outcome_at          TEXT,
+            closed              INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (workstream_id, decision_event_id)
+        ) WITHOUT ROWID;
+        CREATE INDEX IF NOT EXISTS idx_decision_chains_open
+            ON decision_chains(workstream_id, closed, decision_at);
+        CREATE INDEX IF NOT EXISTS idx_decision_chains_action
+            ON decision_chains(action_event_id);
+
+        -- Per-event feedback weight learned from outcomes. Default 1.0;
+        -- nudged by alpha * (polarity_score - 0.5) on each outcome that
+        -- closes a decision the event supported (Cognee improve() pattern,
+        -- adapted to Mneme — research-design-lessons.md §3.3).
+        CREATE TABLE IF NOT EXISTS event_feedback (
+            event_id        TEXT NOT NULL PRIMARY KEY,
+            feedback_weight REAL NOT NULL DEFAULT 1.0,
+            updated_at      TEXT NOT NULL,
+            update_count    INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (event_id) REFERENCES memory_events(event_id)
+        ) WITHOUT ROWID;
         """;
 }
