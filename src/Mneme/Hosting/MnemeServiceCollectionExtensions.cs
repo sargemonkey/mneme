@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Mneme.Capture;
 using Mneme.Classification;
 using Mneme.Contracts;
 using Mneme.Curation;
@@ -107,6 +108,22 @@ public static class MnemeServiceCollectionExtensions
         services.TryAddSingleton<ICurationLog>(sp => new SqliteCurationLog(
             sp.GetRequiredService<SqliteConnectionFactory>(),
             sp.GetRequiredService<TimeProvider>()));
+
+        // Capture pipeline: built only when a host registers an ICapturePolicy.
+        // We register the CaptureSession factory unconditionally so consumers
+        // can resolve it; it throws a clear message if no policy is wired.
+        services.TryAddSingleton<CaptureSession>(sp =>
+        {
+            var policy = sp.GetService<ICapturePolicy>()
+                ?? throw new InvalidOperationException(
+                    "CaptureSession requires an ICapturePolicy. Register one with " +
+                    "services.AddSingleton<ICapturePolicy>(sp => new YourPolicy(...));");
+            return new CaptureSession(
+                sp.GetRequiredService<IMemoryAgent>(),
+                policy,
+                sp.GetServices<ICaptureFilter>(),
+                sp.GetRequiredService<TimeProvider>());
+        });
 
         var permitted = opts.PermittedCategories?.ToArray()
             ?? Array.Empty<EpistemicCategory>(); // empty == all (per CapabilityToken.Allows)
