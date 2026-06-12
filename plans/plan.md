@@ -1,7 +1,49 @@
 # Mneme — Build Plan
 
 **Project**: Mneme — a chronological memory substrate for AI agents.
-**Status**: planned (not started).
+**Status**: **Phases 0–10 + 8.5 shipped (2026-06-12)**; only Phase 11
+(sqlite-vec) deferred upstream. See "Implementation status" below.
+
+## Implementation status (2026-06-12)
+
+| Phase | State | Key artefact |
+|---|---|---|
+| 0 — Contracts | ✅ | `src/Mneme.Contracts/` (BCL-only, 5 host-pluggable interfaces) |
+| 1 — Event log + ingest | ✅ | `src/Mneme/Storage/SqliteSchema.cs` (v7), `Ingest/` (<50ms p99) |
+| 2 — Classification + revocation | ✅ | `src/Mneme/Classification/`, `Revocation/` |
+| 3 — Projections + FTS5 | ✅ | `src/Mneme/Projections/`, `Search/` (adaptive-BM25) |
+| 4 — Capability-checked query API | ✅ | `src/Mneme/Query/MemoryQueryApi.cs` (+ Explain, AsOf) |
+| 4.5 — Benchmarks | ✅ | `benchmarks/Mneme.Benchmarks/` (LoCoMo harness; baseline 1/6 recall) |
+| 5 — Distillation | ✅ | `IDistiller` + `DistillationCache` + heuristic fallback |
+| 6 — Entity resolution | ✅ | 3-tier: UUID5 / embedding ≥0.95 / LLM-propose-confirm |
+| 7 — Outcome closure | ✅ | `DecisionChainsProjector` (D→A→O) + `FeedbackLearner` |
+| 7.5 — HITL curation | ✅ | `IMemoryCurator` (amend/annotate/pin/demote/revert + stale-state guard) |
+| 8 — MCP server | ✅ | `src/Mneme.Mcp/` stdio (remember/query/list_recent/distill/forget/improve) |
+| 8.5 — MAF integration | ✅ | `src/Mneme.Agents.AI/MnemeContextProvider : AIContextProvider` |
+| 9 — Sidecar | ✅ | `src/Mneme.Sidecar/` HTTP + bearer auth + Dockerfile |
+| 10 — Cloud sync | ✅ | `ISyncStore` + `SyncEngine` + `FileSystemSyncStore` |
+| UI scaffold | ✅ | `Mneme.Studio` (Blazor), `.Desktop` (Photino), `.Electron` (pure desktop) |
+| 11 — sqlite-vec | ⏸ blocked | Waiting on sqlite-vec v1 (locked decision in AGENTS.md) |
+
+**Verification**: `dotnet test Mneme.slnx` → 316/316 (136 contracts + 177 Mneme + 3 MAF).
+
+### Pending follow-ups (smaller-scope, deferred inside completed phases)
+- `mem-projection-snapshots` — Letta BlockHistory pattern for projection time-travel.
+- Phase 7.5: `split` / `merge` curator ops, bi-temporal amend carry-over, `IReviewQueue` impl, curation OTel spans.
+- Phase 8: MCP prompts/resources/elicitation/sampling; HTTP transport (split Stdio + Http hosts).
+- Phase 8.5: `MnemeCheckpointStore` (workflow checkpoints), MAF demo sample under `samples/MAF.Demo/`.
+- Bump `Microsoft.Extensions.AI.Abstractions` 9.7.0 → 10.0.0 across non-MAF projects (already pulled transitively).
+
+### Architectural invariant reinforced throughout
+**SDK ships interfaces; host owns the model/LLM/policy.** Five symmetric
+seams live in `Mneme.Contracts` (BCL-only): `ICapturePolicy`,
+`IDistiller`, `IEmbeddingProvider`, `IEntityProposer`, `ISyncStore`.
+Mneme has zero LLM/embedding/cloud SDK dependencies anywhere.
+
+---
+
+## Original plan (design rationale below)
+
 **Scope**: full v3+ design. **No "minimum viable memory" rescope** — design
 the system as a whole.
 **Companion docs**:
