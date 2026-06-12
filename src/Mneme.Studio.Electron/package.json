@@ -1,0 +1,13 @@
+{
+  "name": "mneme-studio-electron",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Pure-desktop Electron Studio for Mneme. No HTTP server — reads SQLite directly (via node:sqlite, built into Electron 35+ via Node 22) and shells out to Mneme.Cli for mutations so all canonical logic stays in C#.",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron --enable-experimental-features ."
+  },
+  "devDependencies": {
+    "electron": "^42.4.0"
+  }
+}

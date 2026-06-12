@@ -17,6 +17,15 @@
        Core app in-process on a private port, then opens a Photino window
        pointed at that port. Single source of truth for UI; the desktop
        app and the browser app are literally the same pages. -->
+  <!-- Copy the web Studio's wwwroot into our output so Bootstrap + the
+       site CSS are served by the in-process host. Without this the
+       WebRootPath warning fires and the pages render unstyled. -->
+  <ItemGroup>
+    <Content Include="..\Mneme.Studio\wwwroot\**\*" LinkBase="wwwroot">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Mneme.Studio\Mneme.Studio.csproj" />
   </ItemGroup>
