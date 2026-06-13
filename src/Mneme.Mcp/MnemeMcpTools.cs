@@ -275,4 +275,112 @@ public static class MnemeMcpTools
             pre_state_hash = result.PreStateHash,
         }, JsonOptions);
     }
+
+    [McpServerTool(
+        Name = "distill_session",
+        Title = "Distill new session entries into Mneme memory",
+        Destructive = true, OpenWorld = false, ReadOnly = false, Idempotent = true)]
+    [Description("""
+        Hand Mneme the entries that have accumulated in the agent's session context since the
+        last distillation watermark for `session_id`. Mneme will pass them through the host's
+        registered session distiller, ingest any epistemic events the distiller chose to extract
+        (each citing the source entry range), and atomically advance the watermark. Idempotent
+        on (session_id, from_entry_id, to_entry_id): re-calling with the same range is a no-op.
+
+        `entries` is a JSON array of {entry_id, timestamp, kind, text, source_ref?} objects.
+        `kind` is one of: UserMessage, AssistantMessage, FileContent, ToolCall, ToolResult,
+        SubAgentOutput, SystemNote, External. `entry_id` must be monotonic within the session.
+
+        Use `get_watermark` first to discover the last-distilled entry id, then send the
+        entries strictly after it.
+        """)]
+    public static async Task<string> DistillSession(
+        IMemoryAgent agent,
+        CapabilityToken token,
+        [Description("Session id whose context is being distilled.")] string sessionId,
+        [Description("JSON array of context entries. See description for shape.")] string entries,
+        CancellationToken ct = default)
+    {
+        if (token.Workstream is null)
+        {
+            throw new InvalidOperationException("Server is not configured for a single workstream.");
+        }
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            throw new ArgumentException("session_id is required.", nameof(sessionId));
+        }
+        var parsed = ParseEntries(entries);
+        var result = await agent.DistillSessionAsync(
+            new SessionId(sessionId), parsed, token, ct).ConfigureAwait(false);
+        return JsonSerializer.Serialize(new
+        {
+            new_events = result.NewEvents.Select(e => e.Value),
+            new_watermark = new
+            {
+                session_id = result.NewWatermark.Session.Value,
+                last_entry_id = result.NewWatermark.LastDistilledEntryId,
+                distilled_at = result.NewWatermark.DistilledAt,
+                distiller_version = result.NewWatermark.DistillerVersion,
+            },
+            dropped = result.Dropped?.Select(d => new { entry_id = d.EntryId, reason = d.Reason }),
+            was_no_op = result.WasNoOp,
+        }, JsonOptions);
+    }
+
+    [McpServerTool(
+        Name = "get_watermark",
+        Title = "Read the distillation watermark for a session",
+        Destructive = false, OpenWorld = false, ReadOnly = true, Idempotent = true)]
+    [Description("""
+        Return the last-distilled entry id for `session_id`, or null if the session has never
+        been distilled. Call before `distill_session` to know which entries are new.
+        """)]
+    public static async Task<string> GetWatermark(
+        IMemoryAgent agent,
+        [Description("Session id to query.")] string sessionId,
+        CancellationToken ct = default)
+    {
+        var w = await agent.GetWatermarkAsync(new SessionId(sessionId), ct).ConfigureAwait(false);
+        if (w is null) return "null";
+        return JsonSerializer.Serialize(new
+        {
+            session_id = w.Session.Value,
+            last_entry_id = w.LastDistilledEntryId,
+            distilled_at = w.DistilledAt,
+            distiller_version = w.DistillerVersion,
+        }, JsonOptions);
+    }
+
+    private static IReadOnlyList<ContextEntry> ParseEntries(string entries)
+    {
+        var list = new List<ContextEntry>();
+        using var doc = JsonDocument.Parse(entries);
+        if (doc.RootElement.ValueKind != JsonValueKind.Array)
+        {
+            throw new ArgumentException("entries must be a JSON array.", nameof(entries));
+        }
+        foreach (var el in doc.RootElement.EnumerateArray())
+        {
+            var entryId = GetRequiredString(el, "entry_id");
+            var ts = DateTimeOffset.Parse(GetRequiredString(el, "timestamp"), System.Globalization.CultureInfo.InvariantCulture);
+            var kindStr = GetRequiredString(el, "kind");
+            if (!Enum.TryParse<ContextEntryKind>(kindStr, ignoreCase: true, out var kind))
+            {
+                throw new ArgumentException($"Unknown kind '{kindStr}' (valid: UserMessage, AssistantMessage, FileContent, ToolCall, ToolResult, SubAgentOutput, SystemNote, External).", nameof(entries));
+            }
+            var text = GetRequiredString(el, "text");
+            string? sourceRef = el.TryGetProperty("source_ref", out var s) && s.ValueKind == JsonValueKind.String ? s.GetString() : null;
+            list.Add(new ContextEntry(entryId, ts, kind, text, sourceRef));
+        }
+        return list;
+    }
+
+    private static string GetRequiredString(JsonElement el, string name)
+    {
+        if (!el.TryGetProperty(name, out var v) || v.ValueKind != JsonValueKind.String)
+        {
+            throw new ArgumentException($"entry missing required string field '{name}'.");
+        }
+        return v.GetString() ?? throw new ArgumentException($"entry field '{name}' is null.");
+    }
 }

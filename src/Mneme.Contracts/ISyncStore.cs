@@ -2,7 +2,7 @@ namespace Mneme.Contracts;
 
 /// <summary>
 /// Host-supplied object store the snapshot sync layer pushes/pulls against.
-/// Symmetric to <see cref="IDistiller"/> / <see cref="ICapturePolicy"/> /
+/// Symmetric to <see cref="IDistiller"/> / <see cref="ISessionDistiller"/> /
 /// <see cref="IEmbeddingProvider"/> — the SDK never imports an S3 SDK
 /// (or any other cloud SDK). Hosts wire their own backend:
 /// </summary>
@@ -36,3 +36,4 @@ public interface ISyncStore
     /// </summary>
     Task WriteAsync(string key, ReadOnlyMemory<byte> content, string contentSha256Hex, CancellationToken ct = default);
 }
+

@@ -27,7 +27,7 @@ namespace Mneme.Storage;
 public static class SqliteSchema
 {
     /// <summary>Current schema version. Bumped when the DDL changes incompatibly.</summary>
-    public const int Version = 7;
+    public const int Version = 8;
 
     /// <summary>
     /// Idempotently create all Phase 1 tables, indexes, and the
@@ -429,6 +429,30 @@ public static class SqliteSchema
             updated_at      TEXT NOT NULL,
             update_count    INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (event_id) REFERENCES memory_events(event_id)
+        ) WITHOUT ROWID;
+
+        -- v8: per-session distillation watermark. One row per session;
+        -- updated atomically (same SqliteTransaction) with the events the
+        -- distillation produced so a crash mid-call never leaves the
+        -- watermark ahead of the events.
+        CREATE TABLE IF NOT EXISTS distillation_watermarks (
+            session_id            TEXT NOT NULL PRIMARY KEY,
+            last_entry_id         TEXT NOT NULL,
+            distilled_at          TEXT NOT NULL,
+            distiller_version     TEXT NOT NULL
+        ) WITHOUT ROWID;
+
+        -- v8: idempotency guard for DistillSessionAsync. The agent records
+        -- (session, from, to) on every successful distillation; re-calling
+        -- with the same triple short-circuits to a no-op result. Indexed by
+        -- session so the lookup is cheap.
+        CREATE TABLE IF NOT EXISTS distillation_runs (
+            session_id      TEXT NOT NULL,
+            from_entry_id   TEXT NOT NULL,
+            to_entry_id     TEXT NOT NULL,
+            distilled_at    TEXT NOT NULL,
+            events_count    INTEGER NOT NULL,
+            PRIMARY KEY (session_id, from_entry_id, to_entry_id)
         ) WITHOUT ROWID;
         """;
 }

@@ -1,6 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Mneme.Capture;
 using Mneme.Classification;
 using Mneme.Contracts;
 using Mneme.Curation;
@@ -13,6 +12,7 @@ using Mneme.Query;
 using Mneme.Resolution;
 using Mneme.Revocation;
 using Mneme.Search;
+using Mneme.Sessions;
 using Mneme.Storage;
 
 namespace Mneme.Hosting;
@@ -103,7 +103,8 @@ public static class MnemeServiceCollectionExtensions
             sp.GetRequiredService<IContentShapeSelector>(),
             sp.GetRequiredService<IClassifier>(),
             sp.GetRequiredService<TimeProvider>(),
-            sp.GetServices<IIngestObserver>()));
+            sp.GetServices<IIngestObserver>(),
+            sp.GetService<ISessionDistiller>()));
         services.TryAddSingleton<IRevocationService>(sp => new SqliteRevocationService(
             sp.GetRequiredService<SqliteConnectionFactory>(),
             sp.GetRequiredService<TimeProvider>()));
@@ -130,21 +131,14 @@ public static class MnemeServiceCollectionExtensions
             sp.GetRequiredService<FeedbackLearner>(),
             sp.GetRequiredService<SqliteConnectionFactory>()));
 
-        // Capture pipeline: built only when a host registers an ICapturePolicy.
-        // We register the CaptureSession factory unconditionally so consumers
-        // can resolve it; it throws a clear message if no policy is wired.
-        services.TryAddSingleton<CaptureSession>(sp =>
-        {
-            var policy = sp.GetService<ICapturePolicy>()
-                ?? throw new InvalidOperationException(
-                    "CaptureSession requires an ICapturePolicy. Register one with " +
-                    "services.AddSingleton<ICapturePolicy>(sp => new YourPolicy(...));");
-            return new CaptureSession(
+        // Session distillation coordinator. Always registered; throws a
+        // clear message at call time if no ISessionDistiller is wired.
+        services.TryAddSingleton<SessionDistillationCoordinator>(sp =>
+            new SessionDistillationCoordinator(
+                sp.GetRequiredService<SqliteConnectionFactory>(),
                 sp.GetRequiredService<IMemoryAgent>(),
-                policy,
-                sp.GetServices<ICaptureFilter>(),
-                sp.GetRequiredService<TimeProvider>());
-        });
+                sp.GetService<ISessionDistiller>(),
+                sp.GetRequiredService<TimeProvider>()));
 
         var permitted = opts.PermittedCategories?.ToArray()
             ?? Array.Empty<EpistemicCategory>(); // empty == all (per CapabilityToken.Allows)

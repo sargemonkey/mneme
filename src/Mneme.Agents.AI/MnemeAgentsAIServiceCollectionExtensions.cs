@@ -1,5 +1,4 @@
 using Microsoft.Extensions.DependencyInjection;
-using Mneme.Capture;
 using Mneme.Contracts;
 
 namespace Mneme.Agents.AI;
@@ -7,8 +6,7 @@ namespace Mneme.Agents.AI;
 /// <summary>
 /// DI ergonomic: <c>services.AddMnemeContextProvider(...)</c> registers
 /// the provider against the workstream the host already configured via
-/// <c>AddMneme</c>. Capability token + capture session are resolved
-/// from DI; both optional.
+/// <c>AddMneme</c>. Capability token is resolved from DI.
 /// </summary>
 public static class MnemeAgentsAIServiceCollectionExtensions
 {
@@ -27,24 +25,12 @@ public static class MnemeAgentsAIServiceCollectionExtensions
         string systemPromptPrefix = "Prior context from Mneme memory:")
     {
         ArgumentNullException.ThrowIfNull(services);
-        services.AddSingleton(sp =>
-        {
-            // CaptureSession's factory throws when no ICapturePolicy is
-            // registered (by design). Probe for the policy first so the
-            // MAF context provider is happy with auto-distill-only setups.
-            CaptureSession? capture = null;
-            if (sp.GetService<ICapturePolicy>() is not null)
-            {
-                capture = sp.GetService<CaptureSession>();
-            }
-            return new MnemeContextProvider(
-                query: sp.GetRequiredService<IMemoryQueryAPI>(),
-                token: sp.GetRequiredService<CapabilityToken>(),
-                workstream: workstream,
-                capture: capture,
-                tokenBudget: tokenBudget,
-                systemPromptPrefix: systemPromptPrefix);
-        });
+        services.AddSingleton(sp => new MnemeContextProvider(
+            query: sp.GetRequiredService<IMemoryQueryAPI>(),
+            token: sp.GetRequiredService<CapabilityToken>(),
+            workstream: workstream,
+            tokenBudget: tokenBudget,
+            systemPromptPrefix: systemPromptPrefix));
         return services;
     }
 }

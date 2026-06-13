@@ -14,7 +14,7 @@
 | 3 — Projections + FTS5 | ✅ | `src/Mneme/Projections/`, `Search/` (adaptive-BM25) |
 | 4 — Capability-checked query API | ✅ | `src/Mneme/Query/MemoryQueryApi.cs` (+ Explain, AsOf) |
 | 4.5 — Benchmarks | ✅ | `benchmarks/Mneme.Benchmarks/` (LoCoMo harness; baseline 1/6 recall) |
-| 5 — Distillation | ✅ | `IDistiller` + `DistillationCache` + heuristic fallback |
+| 5 — Distillation | ✅ | `IDistiller` (read-side bundle) + `ISessionDistiller` (ingest-side chat→events) + `DistillationCache` + heuristic fallback |
 | 6 — Entity resolution | ✅ | 3-tier: UUID5 / embedding ≥0.95 / LLM-propose-confirm |
 | 7 — Outcome closure | ✅ | `DecisionChainsProjector` (D→A→O) + `FeedbackLearner` |
 | 7.5 — HITL curation | ✅ | `IMemoryCurator` (amend/annotate/pin/demote/revert + stale-state guard) |
@@ -36,7 +36,7 @@
 
 ### Architectural invariant reinforced throughout
 **SDK ships interfaces; host owns the model/LLM/policy.** Five symmetric
-seams live in `Mneme.Contracts` (BCL-only): `ICapturePolicy`,
+seams live in `Mneme.Contracts` (BCL-only): `ISessionDistiller`,
 `IDistiller`, `IEmbeddingProvider`, `IEntityProposer`, `ISyncStore`.
 Mneme has zero LLM/embedding/cloud SDK dependencies anywhere.
 

@@ -1,8 +1,6 @@
 using System.Text;
-using System.Text.Json;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
-using Mneme.Capture;
 using Mneme.Contracts;
 
 namespace Mneme.Agents.AI;
@@ -15,28 +13,26 @@ namespace Mneme.Agents.AI;
 /// <para>
 /// On every agent invocation:
 /// <list type="number">
-///   <item>Reads the latest <see cref="ContextBundle"/> for the
-///         configured workstream via <see cref="IMemoryQueryAPI.DistillAsync"/>.</item>
+///   <item>Reads the latest <see cref="ContextBundle"/> for the configured
+///         workstream via <see cref="IMemoryQueryAPI.DistillAsync"/>.</item>
 ///   <item>Returns it as a single <see cref="ChatRole.System"/>
 ///         <see cref="ChatMessage"/> rendered as Markdown so the agent
 ///         sees prior context as a header before its real conversation.</item>
-///   <item>After the agent responds, optionally captures the round-trip
-///         through any registered host <see cref="ICapturePolicy"/> (via
-///         <see cref="CaptureSession"/>) so the next turn's distillation
-///         reflects what just happened.</item>
 /// </list>
 /// </para>
 /// <para>
-/// All three operations honor the SDK's locked-decision invariants:
-/// the capability token is supplied at construction; capture flows
-/// through the same redaction/classification/append-only pipeline as
-/// every other ingest path.
+/// The provider is intentionally read-only on the MAF surface. Capture flows
+/// through <see cref="IMemoryAgent.DistillSessionAsync"/> on the host's own
+/// schedule (typically a periodic worker that hands Mneme the entries that
+/// have accumulated in the session since the last watermark). This keeps
+/// the "host owns the chat log; Mneme stores only the interpretation"
+/// invariant from being undermined by an InvokedAsync hook that quietly
+/// duplicates turns into the event log on every call.
 /// </para>
 /// </remarks>
 public sealed class MnemeContextProvider : AIContextProvider
 {
     private readonly IMemoryQueryAPI _query;
-    private readonly CaptureSession? _capture;
     private readonly WorkstreamId _workstream;
     private readonly CapabilityToken _token;
     private readonly int _tokenBudget;
@@ -46,7 +42,6 @@ public sealed class MnemeContextProvider : AIContextProvider
         IMemoryQueryAPI query,
         CapabilityToken token,
         WorkstreamId workstream,
-        CaptureSession? capture = null,
         int tokenBudget = 4096,
         string systemPromptPrefix = "Prior context from Mneme memory:")
     {
@@ -55,7 +50,6 @@ public sealed class MnemeContextProvider : AIContextProvider
         _query = query;
         _token = token;
         _workstream = workstream;
-        _capture = capture;
         _tokenBudget = tokenBudget;
         _systemPromptPrefix = systemPromptPrefix;
     }
@@ -71,38 +65,6 @@ public sealed class MnemeContextProvider : AIContextProvider
         {
             Messages = new List<ChatMessage> { systemMsg },
         };
-    }
-
-    /// <inheritdoc/>
-    public override async ValueTask InvokedAsync(InvokedContext context, CancellationToken cancellationToken = default)
-    {
-        if (_capture is null) return; // no capture wired — caller manages ingest separately.
-        var now = DateTimeOffset.UtcNow;
-        // Pump request + response through the host's capture policy.
-        foreach (var msg in context.RequestMessages ?? Array.Empty<ChatMessage>())
-        {
-            var turn = new ConversationTurn(
-                Speaker: new PrincipalId(msg.AuthorName ?? RoleToSpeaker(msg.Role)),
-                Content: msg.Text ?? string.Empty,
-                At: now,
-                SessionId: null);
-            if (!string.IsNullOrWhiteSpace(turn.Content))
-            {
-                await _capture.ProcessTurnAsync(turn, _workstream, cancellationToken).ConfigureAwait(false);
-            }
-        }
-        foreach (var msg in context.ResponseMessages ?? Array.Empty<ChatMessage>())
-        {
-            var turn = new ConversationTurn(
-                Speaker: new PrincipalId(msg.AuthorName ?? "agent"),
-                Content: msg.Text ?? string.Empty,
-                At: now,
-                SessionId: null);
-            if (!string.IsNullOrWhiteSpace(turn.Content))
-            {
-                await _capture.ProcessTurnAsync(turn, _workstream, cancellationToken).ConfigureAwait(false);
-            }
-        }
     }
 
     /// <summary>Render a <see cref="ContextBundle"/> as markdown suitable for a system prompt.</summary>
@@ -133,9 +95,4 @@ public sealed class MnemeContextProvider : AIContextProvider
           .Append(" — covers up to event ").Append(bundle.EventsCoveredThrough.Value).AppendLine("_");
         return sb.ToString();
     }
-
-    private static string RoleToSpeaker(ChatRole role) =>
-        role == ChatRole.User ? "user" :
-        role == ChatRole.Assistant ? "agent" :
-        role == ChatRole.System ? "system" : "tool";
 }

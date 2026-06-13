@@ -5,6 +5,7 @@ using Mneme.Ingest.Distillation;
 using Mneme.Ingest.Redaction;
 using Mneme.Ingest.Validation;
 using Mneme.Observability;
+using Mneme.Sessions;
 using Mneme.Storage;
 
 namespace Mneme.Ingest;
@@ -38,12 +39,13 @@ public sealed class MemoryAgent : IMemoryAgent
     private readonly Classification.IClassifier _classifier;
     private readonly TimeProvider _clock;
     private readonly IReadOnlyList<IIngestObserver> _observers;
+    private readonly ISessionDistiller? _sessionDistiller;
 
     /// <summary>Construct against the storage layer with default helpers and no observers.</summary>
     public MemoryAgent(SqliteConnectionFactory connections)
         : this(connections, new RegexRedactor(), new AlwaysRedactedContent(),
                new Classification.RuleBasedClassifier(), TimeProvider.System,
-               Array.Empty<IIngestObserver>())
+               Array.Empty<IIngestObserver>(), sessionDistiller: null)
     { }
 
     /// <summary>Construct with custom helpers, no observers (used by tests + Phase 1 invariant).</summary>
@@ -53,7 +55,7 @@ public sealed class MemoryAgent : IMemoryAgent
         IContentShapeSelector shapeSelector,
         Classification.IClassifier classifier,
         TimeProvider clock)
-        : this(connections, redactor, shapeSelector, classifier, clock, Array.Empty<IIngestObserver>())
+        : this(connections, redactor, shapeSelector, classifier, clock, Array.Empty<IIngestObserver>(), sessionDistiller: null)
     { }
 
     /// <summary>Construct with full customisation including post-commit observers.</summary>
@@ -64,6 +66,18 @@ public sealed class MemoryAgent : IMemoryAgent
         Classification.IClassifier classifier,
         TimeProvider clock,
         IEnumerable<IIngestObserver> observers)
+        : this(connections, redactor, shapeSelector, classifier, clock, observers, sessionDistiller: null)
+    { }
+
+    /// <summary>Full construct including an optional host session distiller.</summary>
+    public MemoryAgent(
+        SqliteConnectionFactory connections,
+        IRedactor redactor,
+        IContentShapeSelector shapeSelector,
+        Classification.IClassifier classifier,
+        TimeProvider clock,
+        IEnumerable<IIngestObserver> observers,
+        ISessionDistiller? sessionDistiller)
     {
         ArgumentNullException.ThrowIfNull(connections);
         ArgumentNullException.ThrowIfNull(redactor);
@@ -77,6 +91,7 @@ public sealed class MemoryAgent : IMemoryAgent
         _classifier = classifier;
         _clock = clock;
         _observers = observers.ToArray();
+        _sessionDistiller = sessionDistiller;
     }
 
     /// <inheritdoc/>
@@ -164,6 +179,26 @@ public sealed class MemoryAgent : IMemoryAgent
         }
 
         return new IngestResult(evt.EventId, nowUtc, wasDuplicate);
+    }
+
+    /// <inheritdoc/>
+    public Task<DistillSessionResult> DistillSessionAsync(
+        SessionId session,
+        IReadOnlyList<ContextEntry> entries,
+        CapabilityToken capability,
+        CancellationToken ct = default)
+    {
+        var coordinator = new SessionDistillationCoordinator(
+            _connections, this, _sessionDistiller, _clock);
+        return coordinator.DistillAsync(session, entries, capability, ct);
+    }
+
+    /// <inheritdoc/>
+    public Task<ContextWatermark?> GetWatermarkAsync(SessionId session, CancellationToken ct = default)
+    {
+        var coordinator = new SessionDistillationCoordinator(
+            _connections, this, _sessionDistiller, _clock);
+        return Task.FromResult(coordinator.GetWatermark(session));
     }
 
     private static string PayloadText(EventPayload p) => p switch

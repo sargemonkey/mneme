@@ -71,3 +71,17 @@ public readonly record struct PrincipalId(string Value)
     /// <inheritdoc/>
     public override string ToString() => Value;
 }
+
+/// <summary>
+/// Identifies an agent session — a single coherent conversation / run that
+/// has a monotonically growing context (chat turns + file reads + tool
+/// outputs + sub-agent results). The host owns the chat history; Mneme
+/// only stores the distilled interpretation of it plus a per-session
+/// watermark recording how far it has been distilled.
+/// </summary>
+/// <param name="Value">The underlying identifier string. Must be non-empty.</param>
+public readonly record struct SessionId(string Value)
+{
+    /// <inheritdoc/>
+    public override string ToString() => Value;
+}

@@ -31,10 +31,12 @@ public sealed record CaptureEvent(
 /// <param name="Source">The capture source identifier (e.g., plugin name, agent name).</param>
 /// <param name="Principal">The principal acting at the source. May be a human or an agent.</param>
 /// <param name="Context">Free-text context (e.g., session id, request id). Useful for grouping and debugging.</param>
+/// <param name="Citation">Optional polymorphic pointer back to the source signal so "why does memory say X?" stays answerable. <see cref="Citation.SessionRange"/> for events produced by session distillation; <see cref="Citation.Manual"/> / <see cref="Citation.Workflow"/> / <see cref="Citation.External"/> for direct-ingest events. <c>null</c> is permitted for un-cited events.</param>
 public sealed record CaptureProvenance(
     CaptureSourceId Source,
     PrincipalId Principal,
-    string? Context = null);
+    string? Context = null,
+    Citation? Citation = null);
 
 /// <summary>
 /// Identifies a capture source (plugin, agent, manual entry). Opaque string;

@@ -3,7 +3,7 @@ namespace Mneme.Contracts;
 /// <summary>
 /// Host-supplied embedding source for Phase 6 entity-resolution Tier 2
 /// (and any future semantic-similarity feature). Symmetric to
-/// <see cref="ICapturePolicy"/> and <see cref="IDistiller"/> — the SDK
+/// <see cref="ISessionDistiller"/> and <see cref="IDistiller"/> — the SDK
 /// never ships an embedding model, so a host using Copilot's models, an
 /// OpenAI key, an on-device sentence-transformer, or no embeddings at
 /// all can wire whatever it has.
@@ -35,3 +35,4 @@ public interface IEmbeddingProvider
         IReadOnlyList<string> texts,
         CancellationToken ct = default);
 }
+
