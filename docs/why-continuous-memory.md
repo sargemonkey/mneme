@@ -151,6 +151,96 @@ semantic and procedural memory.
 
 ---
 
+## Memory in the Weights: Constantly Training Secondary LLMs
+
+Everything above stores memory **outside** the model — in a database,
+graph, or files that get retrieved back into the context window. A
+fundamentally different approach stores memory **inside** model weights
+by continually fine-tuning a model on the agent's own accumulated
+experience. Instead of *retrieving* a fact at inference time, the model
+has *internalized* it.
+
+In practice this almost never means retraining the primary frontier
+model — that's too slow, too expensive, and risks catastrophic
+forgetting. Instead, teams train a **secondary, smaller, specialized
+LLM** (or, more commonly, a lightweight adapter on top of one) on a
+rolling basis. This secondary model becomes a learned, compressed
+embodiment of the agent's history that the primary model can consult or
+defer to.
+
+### How it works
+
+- **Trajectory collection:** The agent's interactions, tool calls,
+  successes, and corrections are logged as training trajectories — the
+  same raw material that reflection/compression pipelines consume.
+- **Periodic fine-tuning:** On a schedule (nightly, weekly, or triggered
+  by volume), those trajectories are distilled into a training set and
+  used to fine-tune the secondary model — typically with parameter-
+  efficient methods like **LoRA / QLoRA adapters** so a full retrain
+  isn't required.
+- **Serving:** The updated adapter is hot-swapped in. The secondary model
+  now answers from internalized knowledge rather than retrieved context.
+
+This is the closest practical realization of **procedural memory** as
+CoALA originally framed it — memory baked into the weights and agent
+code — and it shades into semantic memory when factual knowledge is what
+gets internalized.
+
+### Why teams do it
+
+- ✅ **No retrieval step at inference:** internalized knowledge is "free"
+  in the context window — no tokens spent re-injecting it, no retrieval
+  latency.
+- ✅ **Captures fuzzy, hard-to-retrieve patterns:** style, tone,
+  domain intuition, and procedural know-how that don't fit neatly into
+  retrievable records.
+- ✅ **Compresses massive history:** a year of interactions can live in a
+  small adapter instead of an ever-growing index.
+- ✅ **Strong for stable, high-frequency skills:** workflows the agent
+  performs constantly are better as learned procedure than as a document
+  it re-reads every time.
+
+### Why it's hard (and not a silver bullet)
+
+- ❌ **Catastrophic forgetting:** naive continual fine-tuning erodes prior
+  capabilities. Mitigations (replay buffers, regularization, frozen base
+  + adapters) add real complexity.
+- ❌ **Slow to update:** weights change on a training cadence, not in real
+  time. A fact learned this morning isn't in the model until the next
+  training run — useless for "remember my flight is at 6pm today."
+- ❌ **Opaque and hard to audit:** you can't point at *why* the model
+  believes something, can't easily delete one fact (a GDPR /
+  right-to-be-forgotten problem), and can't show provenance.
+- ❌ **No clean revocation or correction:** fixing a wrong internalized
+  fact may require retraining; there's no `UPDATE` statement for weights.
+- ❌ **Cost and infrastructure:** a training pipeline, eval harness, and
+  rollback strategy are a much heavier lift than a vector store.
+
+### The verdict: complement, not replacement
+
+Weight-based memory and retrieval-based memory solve different halves of
+the problem, and mature systems increasingly use **both**:
+
+| | Retrieval-based (external store) | Weight-based (secondary LLM) |
+|---|---|---|
+| **Update speed** | Real-time | Training-cadence (hours–days) |
+| **Best for** | Facts, events, anything needing precision | Skills, style, procedure, intuition |
+| **Auditability** | Full provenance; per-record delete | Opaque; hard to delete one fact |
+| **Correction** | `UPDATE` / revoke / amend | Retrain or adapter-swap |
+| **Inference cost** | Tokens + retrieval latency | Internalized, no retrieval |
+| **Forgetting risk** | Explicit decay policy | Catastrophic forgetting risk |
+
+> **Rule of thumb:** put *precise, volatile, auditable* knowledge (a
+> user's current preferences, today's decisions, sensitive data) in a
+> retrieval layer; consider distilling *stable, high-frequency, fuzzy*
+> patterns (recurring workflows, domain style) into a periodically-
+> trained secondary model. The retrieval layer is where regulatory,
+> correction, and recency requirements force you to live — which is why
+> systems like Mneme keep memory in an inspectable, append-only,
+> bi-temporal store rather than baking it into weights.
+
+---
+
 ## The Core Operations a Memory Layer Must Support
 
 Beyond storing, a serious memory system has to manage the **lifecycle**
