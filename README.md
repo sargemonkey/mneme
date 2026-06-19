@@ -166,6 +166,15 @@ for the design walkthrough.
 
 **Verification**: `dotnet test Mneme.slnx` → 316/316.
 
+## Background reading
+
+New to agent memory? Start with
+[`docs/why-continuous-memory.md`](docs/why-continuous-memory.md) — a
+primer on why continuous memory matters, the four core memory types,
+how memory updates, and where Mneme fits among Mem0 / Letta / Zep and
+others. For a deeper field survey, see
+[`plans/memory-systems-primer.md`](plans/memory-systems-primer.md).
+
 ## License
 
 [Apache License 2.0](LICENSE). Mneme contains prompt templates ported
