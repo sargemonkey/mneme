@@ -137,7 +137,7 @@ These are repo-wide via `.editorconfig` and `Directory.Build.props`:
 ## Architectural rules — do not violate
 
 These are load-bearing. Changing any of them needs a written ADR in
-`docs/adr/` and an issue discussion first.
+[`docs/adr/`](docs/adr/) and an issue discussion first.
 
 1. **`Mneme.Contracts` depends on nothing but the .NET 8 BCL.** No
    SQLite, no MCP SDK, no Semantic Kernel, no JSON.NET, no anything.
@@ -221,9 +221,10 @@ think they're wrong, open an issue with new evidence; don't just
   stone, pick what reads well as you implement.
 - **Internal interfaces** (anything not in `Mneme.Contracts`) — free
   to add/refactor as needed.
-- **CI**: not set up yet. A GitHub Actions workflow that runs
-  `dotnet build` + `dotnet test` on push to main and on PRs would be a
-  welcome early PR.
+- **CI**: GitHub Actions workflow at
+  [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs
+  `dotnet build` (Release; warnings are errors) + `dotnet test` on push
+  to `main` and on PRs.
 
 ## Working with the planning docs
 

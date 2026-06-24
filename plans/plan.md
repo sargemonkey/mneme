@@ -466,7 +466,7 @@ When the wedge emits `action.executed` (e.g., PR opened), memory agent:
 Manual marking: cockpit UI lets human mark outcomes for actions where
 automated watching isn't possible.
 
-### Human-in-the-loop curation (Phase 6.5 — Mneme differentiator)
+### Human-in-the-loop curation (Phase 7.5 — Mneme differentiator)
 
 Most memory systems treat curation as destructive (`UPDATE` / `DELETE`).
 Mem0, Letta, Cognee, and Zep all support confirm/revoke at best, with no
@@ -494,7 +494,7 @@ workflow** built on the same append-only event log everything else uses.
    curated what, when, with what rationale" — GDPR Article 30 falls
    out for free.
 
-**`IMemoryCurator` interface (Phase 0 contract, Phase 6.5 impl):**
+**`IMemoryCurator` interface (Phase 0 contract, Phase 7.5 impl):**
 
 ```csharp
 public interface IMemoryCurator
@@ -772,117 +772,115 @@ persists locally first, then asynchronously emits to capture bus. If capture
 bus / memory agent is down, the approval still completes; the audit event sits
 in spool until memory recovers.
 
-## Sequencing (~12 weeks, full v3+ scope, parallel with wedge)
+## Sequencing
 
-**Phase 1 — Contracts + foundation** *(~1.5 wks)*
-- `IMemoryAgent`, `IMemoryQueryAPI`, `CapabilityToken` (in shared contracts
-  assembly)
+> **Numbering note.** This section uses the **canonical Phase 0–11
+> scheme** shared by [`backlog.md`](backlog.md), [`README.md`](../README.md),
+> and [`AGENTS.md`](../AGENTS.md). `AGENTS.md` requires these four
+> documents to stay in sync; if you reorder phases, update all of them
+> together. (An earlier revision of this section used an off-by-one
+> Phase 1–11 scheme; it was reconciled on 2026-06-24.)
+
+Status reflects what has shipped as of 2026-06; see the
+"Implementation status" table at the top of this file and `backlog.md`
+for per-task detail.
+
+**Phase 0 — Contracts** ✅
+- `IMemoryAgent`, `IMemoryQueryAPI`, `IMemoryCurator`, `CapabilityToken`,
+  `CurationCapability` (BCL-only `Mneme.Contracts`)
 - Event schema (7 categories, fields, provenance, classification)
+- `QuerySpec` / `QueryResult` / `ContextBundle` DTOs
+- One test per public type
+
+**Phase 1 — Event log + SQLite schema** ✅
 - `memory_events`, `memory_artifacts`, `memory_edges` tables
-- Append-only ingest path (no distillation yet)
-- Basic query (by event id, by workstream + category + time range)
+- Append-only, idempotent ingest (sync stages, <50ms p99)
+- Secret regex redaction inline at ingest
+- ULID event ids; OpenTelemetry from day one
 
-**Phase 2 — Classification + redaction** *(~1 wk)*
-- Secret regex pass
-- LLM classifier integration (pluggable provider)
-- Per-source defaults
-- `RedactedContent` / `ReferenceWithSynopsis` shapes
-- Synopsis quality envelope
+**Phase 2 — Classification + revocation** ✅
+- Pluggable classifier; per-source defaults
+- `RedactedContent` / reference-with-synopsis shapes
+- Content tombstone + `memory.revoke`; per-classification retention hooks
+- `AddMneme(opts => ...)` developer-ergonomic registration
 
-**Phase 3 — Projections** *(~2 wks)*
-- `current_facts`, `current_goals`, `decision_chains`, `hypothesis_states`
+**Phase 3 — Projections (current-state views)** ✅
+- `projection_facts`, `projection_decisions`, `projection_goals`,
+  `projection_hypotheses`
 - Entity index (deterministic resolution only)
 - Rebuild-from-events tooling
-- Text index for free-text query
+- FTS5 text index + adaptive BM25
 
-**Phase 4 — Distillation pipeline** *(~2 wks)*
-- Extraction (events → facts / entities / hypotheses / goals candidates)
-- Workstream context bundle synthesis (two-tier `BundleIndex` + `BundleSection`)
-- Decision rationale synthesis
-- Distillation cache + invalidation
-- **Sync/async split** (sync `Ingest` returns <50ms; `DistillationJob`
-  worker runs extract+resolve+project+synthesize+index asynchronously)
-- Bundle staleness contract (`GeneratedAt`, `EventsCoveredThrough`,
-  `ForceRefresh`)
-- Per-workstream pessimistic SQLite lock for the worker
-- `Explain` flag on `QueryAsync` returning per-signal score decomposition
+**Phase 4 — Temporal graph + capability-checked query API** ✅
+- Point-in-time (`AsOf`) bi-temporal queries; workstream isolation
+- `Explain` flag returning per-signal score decomposition
+- No raw-SQL escape hatch
 
-**Phase 4.5 — Benchmarks: LoCoMo + LongMemEval** *(~3 days)*
-- Run both benchmarks against the queryable Phase 4 stack
-- Publish results (leaderboard numbers + harness scripts)
-- **Expected**: Mneme wins the temporal subcategory of LoCoMo
+**Phase 4.5 — Benchmarks: LoCoMo + LongMemEval** ✅
+- Harness + fixtures against the queryable stack
+- Baseline numbers published honestly (vector search is the next lever)
 
-**Phase 5 — Conservative entity resolution (three-tier)** *(~1.5 wks)*
-- Tier 1: deterministic UUID5 auto-merge (per-identity-type canonicalization spec)
-- Tier 2: embedding similarity ≥0.95 (no-op until Phase 11)
-- Tier 3: LLM-propose (Graphiti `dedupe_nodes.py` prompt) + human/elicitation confirm
-- Merge proposal table + confirm / reject API (stale-proposal guard)
+**Phase 5 — Distillation pipeline (the primary value)** ✅
+- Read side: `IDistiller` → two-tier `BundleIndex` + `BundleSection`
+  synthesis; distillation cache + invalidation; staleness contract
+- Ingest side: `ISessionDistiller` (session entries → epistemic events;
+  see ADR-0003)
+- **Sync/async split** locked (sync `Ingest` <50ms; distillation async)
+- Heuristic fallback when no distiller registered
+
+**Phase 6 — Conservative entity resolution (three-tier)** ✅
+- Tier 1: deterministic UUID5 auto-merge
+- Tier 2: embedding similarity ≥0.95 (no-op until Phase 11 vectors)
+- Tier 3: LLM-propose + human/elicitation confirm (stale-proposal guard)
 - `entity.merged` / `entity.split` events with audit
-- Popularity dampening (`weight = 1 / (1 + 0.001 * (n-1)^2)`)
 
-**Phase 6 — Outcome closure** *(~1 wk)*
-- Per-source outcome watchers (GitHub PR, Email thread, Linear ticket, etc.)
-- Outcome → action → decision linking
+**Phase 7 — Outcome closure** ✅
+- `DecisionChainsProjector` (Decision → Action → Outcome, out-of-order
+  backfill)
+- `FeedbackLearner` (outcome → per-event weight updates)
 - Manual outcome marking API
 
-**Phase 6.5 — HITL Curation surface** *(~1.5 wks)*
-- `IMemoryCurator` interface: `amend`, `annotate`, `pin`, `demote`,
-  `split`, `merge`, `revert` — all append-only events
-- `CurationCapability` token (separate from ingest/query capabilities)
+**Phase 7.5 — HITL curation surface** ✅ *(Mneme differentiator)*
+- `IMemoryCurator`: `amend`, `annotate`, `pin`, `demote`, `revert`
+  (+ planned `split` / `merge`) — all append-only events
+- `CurationCapability` token (separate from ingest/query)
 - Stale-state guard on every mutation (Letta `core_memory_replace`
   pattern: caller cites pre-state hash, fail-on-mismatch)
-- New event types: `fact.amended`, `fact.annotated`, `fact.pinned`,
-  `fact.demoted`, `fact.split`, `fact.merged`, `curation.reverted`
 - `CurationLog` projection (GDPR Article 30 falls out for free)
-- `IReviewQueue` for opt-in pre-distillation review per workstream
-- Pin / demote multipliers wired into Phase 4 retrieval scoring (after
-  fusion, before threshold gate)
-- Distiller honors pins (always include) and demotions (route to
-  `LookupHints`)
-- Differentiator vs. Mem0/Letta/Cognee/Zep (none ship comparable
-  curation surfaces)
+- Pin/demote multipliers wired into Phase 4 retrieval scoring
+- `IReviewQueue` for opt-in pre-distillation review *(interface defined;
+  impl is a follow-up)*
 
-**Phase 7 — Revocation + retention** *(~3 days)*
-- Content tombstone mechanism
-- `memory.revoke` API
-- Per-classification retention policy hooks (default: keep forever)
+**Phase 8 — MCP server interface** ✅
+- Stdio host exposing community-vocab tools (`remember`, `query`,
+  `list_recent`, `distill`, `distill_session`, `get_watermark`,
+  `forget`, `improve`)
+- Explicit tool annotations (Destructive / ReadOnly / OpenWorld /
+  Idempotent)
+- *Follow-ups:* MCP prompts/resources/elicitation/sampling; HTTP
+  transport split
 
-**Phase 8 — Sync v1 (snapshot)** *(~1 wk)*
-- ULID event IDs (already in Phase 1 — confirm)
-- Cloud snapshot upload (S3-compatible)
-- Delta sync (since last sequence)
-- Conflict handling (idempotent insert; projection rebuild)
+**Phase 8.5 — `Mneme.Agents.AI` MAF integration package** ✅
+- `MnemeContextProvider : AIContextProvider` (drop-in MAF context
+  injection; read-only by design — see ADR-0003)
+- *Follow-ups:* `MnemeCheckpointStore`, a real MAF demo sample
 
-**Phase 8.5 — `Mneme.Agents.AI` MAF integration package** *(~1 wk)*
-- `MnemeContextProvider : MessageAIContextProvider` (drop-in MAF
-  context injection)
-- `MnemeCheckpointStore : ICheckpointStore<JsonElement>` (durable
-  MAF workflow checkpoints in `memory_events` as `EventChannel = Technical`)
-- `AddMneme(opts => ...)` developer-ergonomic registration
-- Capability token via `AgentRunOptions.AdditionalProperties
-  ["mneme:capability-token"]`
-- Demo + README comparing against `Microsoft.Agents.AI.Mem0` package
-
-**Phase 9 — Process separation (Sidecar)** *(~1 wk)*
-- gRPC contract
-- Named-pipe transport
-- Health / restart supervision
+**Phase 9 — Sidecar deployment** ✅
+- HTTP host + bearer auth + healthz/readyz + Dockerfile
 - Same SQLite file; coordination via WAL
 
-**Phase 10 — Autonomous capture + heuristics** *(v2, ~2 wks)*
-- Memory agent listens to capture stream beyond deterministic set
-- Heuristic policies (decision-adjacency, novelty, citation density, etc.)
-- Review queue for proposed-not-yet-confirmed captures
-- Human confirm / promote
-- Configurable per-workstream heuristic mix
+**Phase 10 — Cloud snapshot sync** ✅
+- `ISyncStore` + `SyncEngine` + `FileSystemSyncStore`
+- Gzipped JSONL snapshots; idempotent `INSERT OR IGNORE` merge
+- Conflict-free (no last-write-wins)
 
-**Phase 11 — Vector search** *(v2, ~1 wk)*
-- Embedding pipeline (per-event)
-- Vector index (sqlite-vec or similar)
-- Semantic query in `IMemoryQueryAPI`
-
-(Total ~12–14 weeks of memory-agent work; parallelizable with wedge after
-Phase 1 contracts land.)
+**Phase 11 — v2 features (deferred / blocked)** ⏸
+- Vector search: embedding pipeline + `sqlite-vec` semantic query
+  (blocked on `sqlite-vec` v1; FTS5 + structured queries suffice for v1)
+- Vector scoring normalization tests + scale benchmarks
+- Autonomous capture heuristics — note: must be re-thought against the
+  Phase 5 `DistillSessionAsync` model rather than the deleted per-turn
+  capture pipeline (ADR-0003)
 
 ## Risks (memory-specific, inherited + amended from vision-v3.1 §12)
 
@@ -890,7 +888,7 @@ Phase 1 contracts land.)
    Mitigation: deterministic capture in v1 (driven by cockpit, no autonomy);
    autonomous adds in v2 via review queue (human confirms before persist);
    manual "memorize this" / "forget this" always available; **richer
-   curation via `IMemoryCurator` from Phase 6.5 (amend / pin / demote /
+   curation via `IMemoryCurator` from Phase 7.5 (amend / pin / demote /
    split / merge / revert) when over/under-capture is detected after the
    fact**.
 8. **Secret redaction false negatives** — novel formats slip through.
@@ -997,7 +995,7 @@ removes the uncertainty that was blocking commitment.
 
 - Phase 1 (event log + storage) reaffirmed as SQLite-only; remove "consider
   Marten" optionality from Phase 1 decision.
-- Phase 11 (MCP exposure) elevated — was implicit, now explicit: memory
+- Phase 8 (MCP exposure) elevated — was implicit, now explicit: memory
   agent ships an MCP server interface alongside the .NET `IMemoryQueryAPI`.
 - v2+ optional substrate upgrades documented (Marten/PG, Neo4j) for cloud
   sync tier; not needed for desktop v1.

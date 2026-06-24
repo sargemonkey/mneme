@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Restore
+        run: dotnet restore Mneme.slnx
+
+      # Warnings are errors repo-wide (TreatWarningsAsErrors=true in
+      # Directory.Build.props), so a clean build also enforces the
+      # zero-warning policy. --no-restore avoids a redundant restore.
+      - name: Build
+        run: dotnet build Mneme.slnx --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test Mneme.slnx --configuration Release --no-build --verbosity normal

@@ -746,23 +746,29 @@ Don't start until v1 (Phases 0-10) has at least one shipping consumer.
 
 ## Cross-cutting / nice-to-have (not blocking any phase)
 
-- [ ] **ci-github-actions** — Workflow that runs `dotnet build` +
+- [x] **ci-github-actions** — Workflow that runs `dotnet build` +
   `dotnet test` on push to main and on PRs. Should fail on warnings.
+  *(Shipped: `.github/workflows/ci.yml` — Release build with
+  warnings-as-errors + test on push/PR to `main`.)*
 - [ ] **release-automation** — Workflow that packs + pushes NuGet on
   tag. Skip until at least one Phase has a tagged release.
-- [ ] **docs-adr-index** — Set up `docs/adr/` with the
+- [x] **docs-adr-index** — Set up `docs/adr/` with the
   [MADR template](https://adr.github.io/madr/). First ADR: "Why
   SQLite as the only embedded backend" (consolidate
   `research-zep-sqlite-deepdive.md §3` and `plan.md` notes). Second
   ADR: "`IChatClient` instead of Semantic Kernel" (consolidate
   `research-design-lessons.md` §2.15 + §4.7).
+  *(Shipped: `docs/adr/` with template + ADR-0001 (SQLite), ADR-0002
+  (`IChatClient`), ADR-0003 (host owns chat log).)*
 - [ ] **plans-rebrand** — Sweep `plans/*.md` for any remaining
   MuxiMuxi-specific framing that should be re-cast as substrate-general.
-- [ ] **plans-renumber-alignment** — Reconcile `plan.md` "Sequencing"
+- [x] **plans-renumber-alignment** — Reconcile `plan.md` "Sequencing"
   section's Phase 1-11 numbering with `backlog.md` Phase 0-11
   numbering (they're currently off-by-one — plan's Phase 1 = backlog's
   Phase 0). `AGENTS.md` says they must stay in sync. Pick one scheme
   and update README.md, plan.md, backlog.md together.
+  *(Done 2026-06-24: `plan.md` "Sequencing" rewritten to the canonical
+  Phase 0–11 scheme; stale Phase 6.5/Phase 11-MCP references fixed.)*
 - [ ] **benchmarks** — `BenchmarkDotNet` project under `tests/` for
   ingest throughput + query latency. Useful once Phase 1 lands.
 - [ ] **cross-cutting-workstream-export** — Single-file workstream
