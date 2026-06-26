@@ -769,8 +769,11 @@ Don't start until v1 (Phases 0-10) has at least one shipping consumer.
   and update README.md, plan.md, backlog.md together.
   *(Done 2026-06-24: `plan.md` "Sequencing" rewritten to the canonical
   Phase 0–11 scheme; stale Phase 6.5/Phase 11-MCP references fixed.)*
-- [ ] **benchmarks** — `BenchmarkDotNet` project under `tests/` for
+- [x] **benchmarks** — `BenchmarkDotNet` project under `tests/` for
   ingest throughput + query latency. Useful once Phase 1 lands.
+  *(Shipped: `benchmarks/Mneme.Benchmarks.Perf/` — ingest + query-latency
+  microbenchmarks. First run surfaced a ~150× single-category query
+  regression, fixed in `MemoryQueryApi` via an equality predicate.)*
 - [ ] **cross-cutting-workstream-export** — Single-file workstream
   export (event log + projections + artifacts for one workstream)
   for support cases, GDPR Article 20 data-portability, and migration

@@ -43,6 +43,34 @@ public sealed class MemoryQueryApiTests : IDisposable
             new CaptureProvenance(new CaptureSourceId("t"), new PrincipalId("p")));
 
     [Fact]
+    public async Task Query_single_category_filter_returns_only_that_category()
+    {
+        // Exercises the single-category equality fast path (e.category = $cat)
+        // added so SQLite serves ORDER BY valid_at from the category index
+        // instead of a temp-b-tree sort. This test guards its correctness.
+        var (sp, agent, query, token) = BuildHost(workstream: "q-cat1");
+        using var _ = sp;
+        var ws = new WorkstreamId("q-cat1");
+        await agent.IngestAsync(Evidence("c-ev1", "q-cat1", "an evidence item"));
+        await agent.IngestAsync(new CaptureEvent(
+            new EventId("c-fact1"), ws, EventChannel.Epistemic,
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+            new FactPayload("a fact", Array.Empty<EventId>()),
+            new CaptureProvenance(new CaptureSourceId("t"), new PrincipalId("p"))));
+        await agent.IngestAsync(Evidence("c-ev2", "q-cat1", "another evidence item"));
+
+        var onlyEvidence = await query.QueryAsync(new QueryRequest(
+            new QuerySpec(ws, Categories: new[] { EpistemicCategory.Evidence })), token);
+        Assert.Equal(2, onlyEvidence.Items.Count);
+        Assert.All(onlyEvidence.Items, i => Assert.Equal(EpistemicCategory.Evidence, i.Category));
+
+        var onlyFact = await query.QueryAsync(new QueryRequest(
+            new QuerySpec(ws, Categories: new[] { EpistemicCategory.Fact })), token);
+        Assert.Single(onlyFact.Items);
+        Assert.Equal("c-fact1", onlyFact.Items[0].EventId.Value);
+    }
+
+    [Fact]
     public async Task Query_returns_structured_results_workstream_scoped()
     {
         var (sp, agent, query, token) = BuildHost(workstream: "q-ws-1");

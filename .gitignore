@@ -54,3 +54,6 @@ src/Mneme.Studio/data/
 src/Mneme.Studio.Desktop/data/
 src/Mneme.Studio.Desktop/bin/Debug/net8.0/data/
 
+
+# BenchmarkDotNet output
+BenchmarkDotNet.Artifacts/
