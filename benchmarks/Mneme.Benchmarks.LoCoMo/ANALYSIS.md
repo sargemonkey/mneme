@@ -28,8 +28,23 @@ prompt fix (allow inference) + k=20 moved it to 40%.
 
 ### Full conv-26 (199 questions), facts mode, k=20
 
-_(filled in from `datasets/run-conv26-facts/results.md` when the run completes;
-larger per-category n gives sturdier numbers.)_
+Robust per-category n (the 50-Q subset above is too small per category to trust):
+
+| Category | n | Accuracy |
+|---|---:|---:|
+| single-hop | 70 | 60.0% |
+| open-domain | 13 | 46.2% |
+| temporal | 37 | 32.4% |
+| multi-hop | 32 | 21.9% |
+| adversarial | 47 | 10.6% |
+| **Overall** | **199** | **36.2%** |
+
+Mean context: **330 tokens/query** (vs Mem0 ~6,956, Zep ~1,600).
+
+The overall (36.2%) is *lower* than the balanced 50-Q facts run (42%) because the
+real category mix is weighted toward the hard categories — **adversarial (47) and
+temporal (37) are the two largest after single-hop**, and both are weak. The
+balanced subset gave each category equal weight and hid that.
 
 ## Reference numbers (other layers, author-measured)
 
@@ -84,10 +99,26 @@ inflate the apparent gap) and **genuine architecture gaps** (real work to do).
 
 ### What already works
 
-- **Single-hop 70–90%** and **temporal 60–70%** are solid — core hybrid
-  retrieval + bi-temporal stamping does its job.
-- **Token efficiency**: facts mode at ~320 tokens/query is in Zep's ~1,600 /
-  Mem0's ~7,000 range *while* being fully local and in-process.
+- **Single-hop 60%** (n=70) and **open-domain 46%** (n=13) are the strongest —
+  core hybrid retrieval + the reasoning-enabled answer prompt do their job on
+  clean factual and inference questions.
+- **Token efficiency**: facts mode at ~330 tokens/query is *below* Zep's ~1,600
+  and an order of magnitude below Mem0's ~7,000 — while being fully local and
+  in-process. This is Mneme's clearest win on the comparable axes.
+
+### The dominant drag: adversarial + temporal
+
+On the full conv-26, the two biggest non-single-hop categories are also the
+weakest, and they set the overall:
+- **adversarial 10.6% (n=47)** — these hinge on one specific buried detail
+  ("a stained glass window"). Distillation can generalize it away, and top-20
+  retrieval over 419 turns can miss it. This single category drags the overall
+  by ~5–6 points on its own. **Reranking + higher recall depth is the fix.**
+- **temporal 32.4% (n=37)** — date-difference reasoning. Bi-temporal stamping
+  gets the events in; the answer model still has to compute deltas. A temporal-
+  aware retrieval/answer path would help.
+- **multi-hop 21.9% (n=32)** — needs evidence gathered across turns; single-pass
+  top-k misses the combination. **Iterative retrieval is the fix.**
 
 ## Prioritized next experiments
 
