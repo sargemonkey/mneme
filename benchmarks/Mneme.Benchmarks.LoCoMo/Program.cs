@@ -13,8 +13,13 @@ namespace Mneme.Benchmarks.LoCoMo;
 ///   --k &lt;int&gt;          Top-k memory snippets retrieved per question (default 10).
 ///   --limit &lt;int&gt;      Max samples to evaluate (default: all).
 ///
-/// Real run (turnkey, OpenAI-compatible — OpenAI / Azure / Ollama / vLLM / LM Studio):
-///   set MNEME_LLM_BASE_URL   = https://api.openai.com   (or your gateway)
+/// Real run with GitHub Models (uses Copilot's catalog — gpt-4o-mini, etc.):
+///   set MNEME_LLM_PROVIDER = github-models
+///   set GITHUB_TOKEN       = &lt;a GitHub token with the models:read scope&gt;
+///   (optional) MNEME_LLM_MODEL=openai/gpt-4o-mini  MNEME_EMBED_MODEL=openai/text-embedding-3-small
+///
+/// Real run with any other OpenAI-compatible endpoint (OpenAI / Azure / Ollama / vLLM):
+///   set MNEME_LLM_BASE_URL   = https://api.openai.com
 ///   set MNEME_LLM_API_KEY    = sk-...
 ///   set MNEME_LLM_MODEL      = gpt-4o-mini
 ///   set MNEME_EMBED_MODEL    = text-embedding-3-small
@@ -68,6 +73,39 @@ internal static class Program
 
     private static (IEmbeddingProvider embedder, IAnswerer answerer, IJudge judge, string mode) BuildClients()
     {
+        var provider = (Environment.GetEnvironmentVariable("MNEME_LLM_PROVIDER") ?? "").Trim().ToLowerInvariant();
+
+        // --- GitHub Models (the "use Copilot / GitHub models" path) ---------
+        // OpenAI-compatible inference over https://models.github.ai/inference,
+        // authenticated with a GitHub token carrying the models:read scope.
+        // Model ids are publisher-prefixed (openai/gpt-4o-mini).
+        if (provider is "github-models" or "github" or "copilot")
+        {
+            var token = Environment.GetEnvironmentVariable("GITHUB_TOKEN")
+                ?? Environment.GetEnvironmentVariable("MNEME_LLM_API_KEY")
+                ?? "";
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                Console.Error.WriteLine("github-models requires a GitHub token with 'models:read' in GITHUB_TOKEN.");
+                Console.Error.WriteLine("Falling back to offline dry-run.");
+                return (new OfflineEmbedder(), new OfflineAnswerer(), new OfflineJudge(), "dry-run (no GITHUB_TOKEN)");
+            }
+            const string ghBase = "https://models.github.ai";
+            var ghHeaders = new Dictionary<string, string>
+            {
+                ["Accept"] = "application/vnd.github+json",
+                ["X-GitHub-Api-Version"] = "2026-03-10",
+            };
+            var chatModel = Environment.GetEnvironmentVariable("MNEME_LLM_MODEL") ?? "openai/gpt-4o-mini";
+            var embModel = Environment.GetEnvironmentVariable("MNEME_EMBED_MODEL") ?? "openai/text-embedding-3-small";
+            var embDim = int.TryParse(Environment.GetEnvironmentVariable("MNEME_EMBED_DIM"), out var gd) ? gd : 1536;
+
+            var ghChat = new OpenAICompatibleChat(ghBase, token, chatModel, "inference/chat/completions", ghHeaders);
+            var ghEmbed = new OpenAICompatibleEmbedder(ghBase, token, embModel, embDim, "inference/embeddings", ghHeaders);
+            return (ghEmbed, ghChat, ghChat, $"github-models ({chatModel} + {embModel})");
+        }
+
+        // --- Generic OpenAI-compatible endpoint -----------------------------
         var baseUrl = Environment.GetEnvironmentVariable("MNEME_LLM_BASE_URL");
         var apiKey = Environment.GetEnvironmentVariable("MNEME_LLM_API_KEY") ?? "";
         var model = Environment.GetEnvironmentVariable("MNEME_LLM_MODEL");
@@ -78,7 +116,7 @@ internal static class Program
         }
 
         var embedModel = Environment.GetEnvironmentVariable("MNEME_EMBED_MODEL") ?? "text-embedding-3-small";
-        var embedDim = int.TryParse(Environment.GetEnvironmentVariable("MNEME_EMBED_DIM"), out var d) ? d : 1536;
+        var embedDim = int.TryParse(Environment.GetEnvironmentVariable("MNEME_EMBED_DIM"), out var dd) ? dd : 1536;
         var embedBaseUrl = Environment.GetEnvironmentVariable("MNEME_EMBED_BASE_URL") ?? baseUrl;
         var embedKey = Environment.GetEnvironmentVariable("MNEME_EMBED_API_KEY") ?? apiKey;
 

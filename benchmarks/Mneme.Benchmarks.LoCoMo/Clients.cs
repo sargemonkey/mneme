@@ -72,16 +72,23 @@ public sealed class OpenAICompatibleChat : IAnswerer, IJudge, IDisposable
 {
     private readonly HttpClient _http;
     private readonly string _model;
+    private readonly string _chatPath;
     public string Id { get; }
 
-    public OpenAICompatibleChat(string baseUrl, string apiKey, string model)
+    public OpenAICompatibleChat(string baseUrl, string apiKey, string model,
+        string chatPath = "v1/chat/completions", IReadOnlyDictionary<string, string>? extraHeaders = null)
     {
         _http = new HttpClient { BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/"), Timeout = TimeSpan.FromSeconds(120) };
         if (!string.IsNullOrEmpty(apiKey))
         {
             _http.DefaultRequestHeaders.Authorization = new("Bearer", apiKey);
         }
+        if (extraHeaders is not null)
+        {
+            foreach (var (k, v) in extraHeaders) _http.DefaultRequestHeaders.TryAddWithoutValidation(k, v);
+        }
         _model = model;
+        _chatPath = chatPath;
         Id = $"openai-compatible/{model}";
     }
 
@@ -118,7 +125,7 @@ public sealed class OpenAICompatibleChat : IAnswerer, IJudge, IDisposable
                 new { role = "user", content = user },
             },
         };
-        using var resp = await _http.PostAsJsonAsync("v1/chat/completions", body, ct).ConfigureAwait(false);
+        using var resp = await _http.PostAsJsonAsync(_chatPath, body, ct).ConfigureAwait(false);
         resp.EnsureSuccessStatusCode();
         using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false));
         return doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? "";
@@ -132,24 +139,31 @@ public sealed class OpenAICompatibleEmbedder : IEmbeddingProvider, IDisposable
 {
     private readonly HttpClient _http;
     private readonly string _model;
+    private readonly string _embedPath;
     public string Id { get; }
     public int Dimensions { get; }
 
-    public OpenAICompatibleEmbedder(string baseUrl, string apiKey, string model, int dimensions)
+    public OpenAICompatibleEmbedder(string baseUrl, string apiKey, string model, int dimensions,
+        string embedPath = "v1/embeddings", IReadOnlyDictionary<string, string>? extraHeaders = null)
     {
         _http = new HttpClient { BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/"), Timeout = TimeSpan.FromSeconds(120) };
         if (!string.IsNullOrEmpty(apiKey))
         {
             _http.DefaultRequestHeaders.Authorization = new("Bearer", apiKey);
         }
+        if (extraHeaders is not null)
+        {
+            foreach (var (k, v) in extraHeaders) _http.DefaultRequestHeaders.TryAddWithoutValidation(k, v);
+        }
         _model = model;
+        _embedPath = embedPath;
         Dimensions = dimensions;
         Id = $"openai-compatible/{model}@{dimensions}";
     }
 
     public async Task<IReadOnlyList<ReadOnlyMemory<float>>> EmbedAsync(IReadOnlyList<string> texts, CancellationToken ct = default)
     {
-        using var resp = await _http.PostAsJsonAsync("v1/embeddings",
+        using var resp = await _http.PostAsJsonAsync(_embedPath,
             new { model = _model, input = texts }, ct).ConfigureAwait(false);
         resp.EnsureSuccessStatusCode();
         using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false));

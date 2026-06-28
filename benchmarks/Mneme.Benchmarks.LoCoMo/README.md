@@ -21,11 +21,40 @@ For each LoCoMo conversation:
 4. **Score** overall and per LoCoMo category (single-hop, multi-hop, temporal,
    open-domain, adversarial), plus the mean context tokens per query.
 
-## Run it — real (turnkey, OpenAI-compatible)
+## Run it — with GitHub Models (Copilot's model catalog)
 
-Works with OpenAI, Azure OpenAI, Ollama, vLLM, or LM Studio — anything that
-speaks the `/v1/chat/completions` + `/v1/embeddings` REST shape. Point the
-base URL + key at your provider:
+The easiest "use Copilot models" path. GitHub Models exposes OpenAI, DeepSeek,
+Llama, and other models over an OpenAI-compatible inference endpoint
+(`https://models.github.ai/inference`), authenticated with a GitHub token that
+carries the **`models:read`** scope.
+
+```pwsh
+$env:MNEME_LLM_PROVIDER = "github-models"
+$env:GITHUB_TOKEN       = "ghp_..."   # fine-grained PAT or GitHub App token with models:read
+
+# Optional overrides (these are the defaults):
+$env:MNEME_LLM_MODEL   = "openai/gpt-4o-mini"
+$env:MNEME_EMBED_MODEL = "openai/text-embedding-3-small"
+$env:MNEME_EMBED_DIM   = "1536"
+
+# Download the real dataset first (see below), then:
+dotnet run -c Release --project benchmarks/Mneme.Benchmarks.LoCoMo -- --dataset path/to/locomo10.json
+```
+
+Notes:
+- Model ids are **publisher-prefixed** (`openai/gpt-4o-mini`,
+  `openai/text-embedding-3-small`). Browse the catalog at
+  [github.com/marketplace/models](https://github.com/marketplace/models).
+- Create the token under Settings → Developer settings → fine-grained PAT, with
+  the **Models** permission set to read. A classic PAT with `models:read` works too.
+- GitHub Models free API usage is **rate limited** — for the full 1,540-question
+  LoCoMo set you may hit limits; use `--limit` to evaluate a subset, or upgrade
+  to paid usage. The harness processes sequentially and you can resume by
+  re-running with a smaller slice.
+
+## Run it — any other OpenAI-compatible endpoint (OpenAI / Azure / Ollama / vLLM)
+
+Point the base URL + key at your provider:
 
 ```pwsh
 $env:MNEME_LLM_BASE_URL = "https://api.openai.com"
@@ -33,8 +62,6 @@ $env:MNEME_LLM_API_KEY  = "sk-..."
 $env:MNEME_LLM_MODEL    = "gpt-4o-mini"
 $env:MNEME_EMBED_MODEL  = "text-embedding-3-small"
 $env:MNEME_EMBED_DIM    = "1536"
-
-# Download the real dataset first (see below), then:
 dotnet run -c Release --project benchmarks/Mneme.Benchmarks.LoCoMo -- --dataset path/to/locomo10.json
 ```
 
