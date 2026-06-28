@@ -43,6 +43,21 @@ public sealed class MemoryQueryApiTests : IDisposable
             new CaptureProvenance(new CaptureSourceId("t"), new PrincipalId("p")));
 
     [Fact]
+    public async Task Free_text_query_with_punctuation_does_not_throw()
+    {
+        // Natural-language questions contain FTS5 metacharacters ("?", "'",
+        // parens). They must be sanitized, not passed raw into MATCH.
+        var (sp, agent, query, token) = BuildHost(workstream: "q-nl");
+        using var _ = sp;
+        await agent.IngestAsync(Evidence("nl-1", "q-nl", "Alice adopted a golden retriever named Max"));
+        await agent.IngestAsync(Evidence("nl-2", "q-nl", "Bob is training for a marathon"));
+
+        var result = await query.QueryAsync(new QueryRequest(
+            new QuerySpec(new WorkstreamId("q-nl"), FreeText: "What kind of dog does Alice have?")), token);
+        Assert.Contains(result.Items, i => i.EventId.Value == "nl-1");
+    }
+
+    [Fact]
     public async Task Query_single_category_filter_returns_only_that_category()
     {
         // Exercises the single-category equality fast path (e.category = $cat)

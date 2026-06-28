@@ -2,6 +2,7 @@
   <Folder Name="/benchmarks/">
     <Project Path="benchmarks/Mneme.Benchmarks/Mneme.Benchmarks.csproj" />
     <Project Path="benchmarks/Mneme.Benchmarks.Perf/Mneme.Benchmarks.Perf.csproj" />
+    <Project Path="benchmarks/Mneme.Benchmarks.LoCoMo/Mneme.Benchmarks.LoCoMo.csproj" />
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/Mneme.Samples.AgentHost/Mneme.Samples.AgentHost.csproj" />

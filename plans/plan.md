@@ -23,15 +23,23 @@
 | 9 — Sidecar | ✅ | `src/Mneme.Sidecar/` HTTP + bearer auth + Dockerfile |
 | 10 — Cloud sync | ✅ | `ISyncStore` + `SyncEngine` + `FileSystemSyncStore` |
 | UI scaffold | ✅ | `Mneme.Studio` (Blazor), `.Desktop` (Photino), `.Electron` (pure desktop) |
-| 11 — sqlite-vec | ⏸ blocked | Waiting on sqlite-vec v1 (locked decision in AGENTS.md) |
+| Semantic retrieval | ✅ | `VectorIndex` — brute-force cosine KNN over float32-BLOB embeddings; hybrid (semantic+BM25+recency) query fusion. Unblocks LoCoMo. |
+| LoCoMo harness | ✅ | `benchmarks/Mneme.Benchmarks.LoCoMo` — ingest→embed→retrieve→answer→judge→score; OpenAI-compatible (turnkey) + offline dry-run. |
+| 11 — sqlite-vec @ scale | ⏸ partial | Brute-force vectors ship now (sufficient to LoCoMo scale). sqlite-vec still deferred for million-vector corpora; autonomous capture still deferred. |
 
-**Verification**: `dotnet test Mneme.slnx` → 316/316 (136 contracts + 177 Mneme + 3 MAF).
+**Verification**: `dotnet test Mneme.slnx` → 321/321 (136 contracts + 182 Mneme + 3 MAF).
+
+### Benchmarks
+- **`Mneme.Benchmarks.Perf`** — storage-layer latency (BenchmarkDotNet). Ingest ~1.4ms/event; hybrid/category/list queries sub-ms–low-ms.
+- **`Mneme.Benchmarks.LoCoMo`** — accuracy benchmark comparable to Mem0/Zep. Needs a real chat+embedding model for a comparable score (env-wired); runs offline in dry-run mode to verify the pipeline.
 
 ### Pending follow-ups (smaller-scope, deferred inside completed phases)
+- Run the real LoCoMo set with a production model and publish the number vs Mem0 (92.5) / Zep.
 - `mem-projection-snapshots` — Letta BlockHistory pattern for projection time-travel.
 - Phase 7.5: `split` / `merge` curator ops, bi-temporal amend carry-over, `IReviewQueue` impl, curation OTel spans.
 - Phase 8: MCP prompts/resources/elicitation/sampling; HTTP transport (split Stdio + Http hosts).
 - Phase 8.5: `MnemeCheckpointStore` (workflow checkpoints), MAF demo sample under `samples/MAF.Demo/`.
+- sqlite-vec for million-vector corpora; vector-score normalization tests + scale benchmark.
 - Bump `Microsoft.Extensions.AI.Abstractions` 9.7.0 → 10.0.0 across non-MAF projects (already pulled transitively).
 
 ### Architectural invariant reinforced throughout

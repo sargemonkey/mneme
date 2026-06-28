@@ -88,6 +88,11 @@ public sealed class TextSearchService
         {
             return Array.Empty<SearchHit>();
         }
+        var matchQuery = BuildMatchQuery(query);
+        if (matchQuery.Length == 0)
+        {
+            return Array.Empty<SearchHit>();
+        }
         var tokenCount = AdaptiveBm25.CountTokens(query);
 
         using var c = _connections.Open();
@@ -99,7 +104,7 @@ public sealed class TextSearchService
             ORDER BY raw ASC
             LIMIT $lim;
             """;
-        cmd.Parameters.AddWithValue("$q", query);
+        cmd.Parameters.AddWithValue("$q", matchQuery);
         cmd.Parameters.AddWithValue("$ws", workstreamId);
         cmd.Parameters.AddWithValue("$lim", limit);
 
@@ -126,6 +131,36 @@ public sealed class TextSearchService
         // bm25() ascending sort hit the storage; re-sort by combined score for the caller.
         results.Sort(static (a, b) => b.Score.CompareTo(a.Score));
         return results;
+    }
+
+    /// <summary>
+    /// Turn an arbitrary natural-language query into a safe FTS5 MATCH
+    /// expression. Raw user text frequently contains FTS5 operators ("?",
+    /// quotes, parens, AND/OR/NOT, "-") that raise a syntax error if passed
+    /// through verbatim. We extract bare alphanumeric tokens, wrap each in
+    /// double quotes (so FTS5 treats it as a literal term, not an operator),
+    /// and OR them together so any term can match — the right recall posture
+    /// for question-style queries.
+    /// </summary>
+    internal static string BuildMatchQuery(string raw)
+    {
+        var tokens = new List<string>();
+        var current = new System.Text.StringBuilder();
+        foreach (var ch in raw)
+        {
+            if (char.IsLetterOrDigit(ch))
+            {
+                current.Append(char.ToLowerInvariant(ch));
+            }
+            else if (current.Length > 0)
+            {
+                tokens.Add(current.ToString());
+                current.Clear();
+            }
+        }
+        if (current.Length > 0) tokens.Add(current.ToString());
+        if (tokens.Count == 0) return string.Empty;
+        return string.Join(" OR ", tokens.Select(t => "\"" + t + "\""));
     }
 }
 

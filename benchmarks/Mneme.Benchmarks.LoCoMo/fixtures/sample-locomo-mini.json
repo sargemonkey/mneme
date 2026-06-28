@@ -1,0 +1,50 @@
+[
+  {
+    "sample_id": "mini-001",
+    "conversation": {
+      "speaker_a": "Alice",
+      "speaker_b": "Bob",
+      "session_1_date_time": "1:56 pm on 8 May, 2023",
+      "session_1": [
+        { "speaker": "Alice", "dia_id": "D1:1", "text": "I just adopted a golden retriever puppy named Max." },
+        { "speaker": "Bob", "dia_id": "D1:2", "text": "That's wonderful! How old is Max?" },
+        { "speaker": "Alice", "dia_id": "D1:3", "text": "He's about 10 weeks old. We got him from a shelter in Portland." }
+      ],
+      "session_2_date_time": "9:10 am on 3 June, 2023",
+      "session_2": [
+        { "speaker": "Bob", "dia_id": "D2:1", "text": "How is the puppy training going?" },
+        { "speaker": "Alice", "dia_id": "D2:2", "text": "Max can already sit and stay. We start agility classes next month." },
+        { "speaker": "Alice", "dia_id": "D2:3", "text": "Also I accepted a new job as a data scientist at a fintech startup." }
+      ]
+    },
+    "qa": [
+      { "question": "What kind of dog does Alice have?", "answer": "a golden retriever", "category": 4 },
+      { "question": "Where did Alice get her puppy?", "answer": "from a shelter in Portland", "category": 4 },
+      { "question": "What is Alice's new job?", "answer": "data scientist at a fintech startup", "category": 4 },
+      { "question": "How many weeks passed between adopting Max and starting agility classes being mentioned?", "answer": "about four weeks", "category": 2 }
+    ]
+  },
+  {
+    "sample_id": "mini-002",
+    "conversation": {
+      "speaker_a": "Carol",
+      "speaker_b": "Dave",
+      "session_1_date_time": "6:30 pm on 12 January, 2024",
+      "session_1": [
+        { "speaker": "Carol", "dia_id": "D1:1", "text": "I'm training for the Boston Marathon in April." },
+        { "speaker": "Dave", "dia_id": "D1:2", "text": "Impressive! What's your weekly mileage?" },
+        { "speaker": "Carol", "dia_id": "D1:3", "text": "Around 50 miles. My longest run so far was 18 miles last weekend." }
+      ],
+      "session_2_date_time": "8:00 am on 20 February, 2024",
+      "session_2": [
+        { "speaker": "Dave", "dia_id": "D2:1", "text": "Did you recover from that knee strain?" },
+        { "speaker": "Carol", "dia_id": "D2:2", "text": "Yes, fully healed. I switched to a new brand of running shoes that helped a lot." }
+      ]
+    },
+    "qa": [
+      { "question": "Which marathon is Carol training for?", "answer": "the Boston Marathon", "category": 4 },
+      { "question": "What was Carol's longest run?", "answer": "18 miles", "category": 4 },
+      { "question": "What helped Carol's knee recover?", "answer": "switching to a new brand of running shoes", "category": 1 }
+    ]
+  }
+]
