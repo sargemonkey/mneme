@@ -66,8 +66,18 @@ dotnet run -c Release --project benchmarks/Mneme.Benchmarks.LoCoMo -- --dataset 
 ```
 
 Optional: `MNEME_EMBED_BASE_URL` / `MNEME_EMBED_API_KEY` if embeddings live on
-a different endpoint than chat. `--k <int>` sets retrieval depth (default 10);
-`--limit <n>` caps the number of conversations.
+a different endpoint than chat.
+
+**Flags:**
+- `--k <int>` — retrieval depth (default 10).
+- `--limit <n>` — cap the number of conversations.
+- `--ingest turns|facts|both` — how the conversation is loaded into Mneme
+  (default `facts`): `turns` = raw turns as Evidence (lexical baseline);
+  `facts` = distill into atomic Fact events first (Mneme's thesis, most
+  token-efficient); `both` = raw turns + distilled facts (max recall).
+- `--rpm <n>` — client-side requests/minute cap (default 10). Stays under the
+  provider's rate limit; combined with checkpointing, a throttled long run is
+  fully resumable. `MNEME_LLM_MAX_RETRIES` (default 8) controls 429/5xx retry.
 
 ## Sample result (illustrative)
 
@@ -163,6 +173,11 @@ tolerant of the official schema (multi-session `conversation` + `qa` arrays,
 `adversarial_answer` for category 5).
 
 ## Interpreting results vs. Mem0 / Zep
+
+See **[ANALYSIS.md](ANALYSIS.md)** for recorded results (raw vs. distilled vs.
+both ingest modes), the comparison to published Mem0 / Zep numbers, and an
+honest breakdown of where the gaps come from (methodology differences vs.
+genuine retrieval-architecture work still to do).
 
 - **Comparable axis:** overall + per-category accuracy, and mean context tokens
   per query (token efficiency). These line up directly with Mem0's LoCoMo 92.5
