@@ -24,14 +24,19 @@
 | 10 — Cloud sync | ✅ | `ISyncStore` + `SyncEngine` + `FileSystemSyncStore` |
 | UI scaffold | ✅ | `Mneme.Studio` (Blazor), `.Desktop` (Photino), `.Electron` (pure desktop) |
 | Semantic retrieval | ✅ | `VectorIndex` — brute-force cosine KNN over float32-BLOB embeddings; hybrid (semantic+BM25+recency) query fusion. Unblocks LoCoMo. |
-| LoCoMo harness | ✅ | `benchmarks/Mneme.Benchmarks.LoCoMo` — ingest→embed→retrieve→answer→judge→score; OpenAI-compatible (turnkey) + offline dry-run. |
+| Reranking | ✅ | `IReranker` (6th host seam) — two-stage retrieve-then-rerank; hybrid pool → cross-encoder/LLM rerank → top-k. |
+| LoCoMo harness | ✅ | `benchmarks/Mneme.Benchmarks.LoCoMo` — ingest(turns/facts/both)→embed→retrieve→[rerank]→answer→judge→score; GitHub Models turnkey + rate-limit/retry + resume + CSV/MD export. |
 | 11 — sqlite-vec @ scale | ⏸ partial | Brute-force vectors ship now (sufficient to LoCoMo scale). sqlite-vec still deferred for million-vector corpora; autonomous capture still deferred. |
 
-**Verification**: `dotnet test Mneme.slnx` → 321/321 (136 contracts + 182 Mneme + 3 MAF).
+**Verification**: `dotnet test Mneme.slnx` → 327/327 (139 contracts + 185 Mneme + 3 MAF).
 
 ### Benchmarks
-- **`Mneme.Benchmarks.Perf`** — storage-layer latency (BenchmarkDotNet). Ingest ~1.4ms/event; hybrid/category/list queries sub-ms–low-ms.
-- **`Mneme.Benchmarks.LoCoMo`** — accuracy benchmark comparable to Mem0/Zep. Needs a real chat+embedding model for a comparable score (env-wired); runs offline in dry-run mode to verify the pipeline.
+- **`Mneme.Benchmarks.Perf`** — storage-layer latency (BenchmarkDotNet). Ingest ~1.4ms/event; queries sub-ms–low-ms.
+- **`Mneme.Benchmarks.LoCoMo`** — accuracy benchmark vs Mem0/Zep. Live result (conv-26, 199 Q, facts mode, gpt-4o-mini): **36.2% overall, 330 tokens/query**. See `benchmarks/Mneme.Benchmarks.LoCoMo/ANALYSIS.md` for the dip breakdown + next levers (rerank shipped; iterative multi-hop retrieval next).
+
+### Six host-pluggable seams (all in `Mneme.Contracts`, BCL-only)
+`ISessionDistiller`, `IDistiller`, `IEmbeddingProvider`, `IEntityProposer`,
+`ISyncStore`, `IReranker`. SDK ships interfaces; host owns the model.
 
 ### Pending follow-ups (smaller-scope, deferred inside completed phases)
 - Run the real LoCoMo set with a production model and publish the number vs Mem0 (92.5) / Zep.
@@ -43,10 +48,10 @@
 - Bump `Microsoft.Extensions.AI.Abstractions` 9.7.0 → 10.0.0 across non-MAF projects (already pulled transitively).
 
 ### Architectural invariant reinforced throughout
-**SDK ships interfaces; host owns the model/LLM/policy.** Five symmetric
+**SDK ships interfaces; host owns the model/LLM/policy.** Six symmetric
 seams live in `Mneme.Contracts` (BCL-only): `ISessionDistiller`,
-`IDistiller`, `IEmbeddingProvider`, `IEntityProposer`, `ISyncStore`.
-Mneme has zero LLM/embedding/cloud SDK dependencies anywhere.
+`IDistiller`, `IEmbeddingProvider`, `IEntityProposer`, `ISyncStore`,
+`IReranker`. Mneme has zero LLM/embedding/cloud SDK dependencies anywhere.
 
 ---
 
