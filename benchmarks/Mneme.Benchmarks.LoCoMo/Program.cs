@@ -12,6 +12,13 @@ namespace Mneme.Benchmarks.LoCoMo;
 ///   --dataset &lt;path&gt;   LoCoMo JSON (default: bundled mini fixture).
 ///   --k &lt;int&gt;          Top-k memory snippets retrieved per question (default 10).
 ///   --limit &lt;int&gt;      Max samples to evaluate (default: all).
+///   --out &lt;dir&gt;        Output directory for results.jsonl + results.csv
+///                      (default: &lt;build-dir&gt;/locomo-results).
+///   --fresh            Ignore + overwrite any prior results in --out.
+///
+/// Resume: graded questions are appended to results.jsonl as they complete, so
+/// re-running the same command skips everything already done (survives rate
+/// limits and Ctrl-C).
 ///
 /// Real run with GitHub Models (uses Copilot's catalog — gpt-4o-mini, etc.):
 ///   set MNEME_LLM_PROVIDER = github-models
@@ -55,13 +62,36 @@ internal static class Program
         Console.Error.WriteLine($"Mode: {mode}");
 
         var dataRoot = Path.Combine(AppContext.BaseDirectory, "locomo-data");
+        var outDir = GetArg(args, "--out") ?? Path.Combine(AppContext.BaseDirectory, "locomo-results");
+        var store = new RunStore(Path.Combine(outDir, "results.jsonl"));
+        if (args.Contains("--fresh"))
+        {
+            store.Delete();
+            Console.Error.WriteLine("--fresh: cleared any prior results, starting over.");
+        }
+
         var evaluator = new LoCoMoEvaluator(dataRoot, embedder, answerer, judge, topK);
 
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
 
-        var report = await evaluator.RunAsync(samples, cts.Token).ConfigureAwait(false);
+        LoCoMoReport report;
+        try
+        {
+            report = await evaluator.RunAsync(samples, store, cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            Console.Error.WriteLine();
+            Console.Error.WriteLine($"Interrupted. Progress saved to {store.JsonlPath}.");
+            Console.Error.WriteLine("Re-run the same command to resume where you left off.");
+            return 130;
+        }
+
+        var csvPath = store.ExportCsv(store.LoadExisting().Values.OrderBy(r => r.SampleId).ThenBy(r => r.QuestionIndex));
         Console.WriteLine(report.ToConsole());
+        Console.Error.WriteLine($"Per-question grades: {store.JsonlPath}");
+        Console.Error.WriteLine($"CSV export        : {csvPath}");
 
         if (mode.StartsWith("dry-run", StringComparison.Ordinal))
         {

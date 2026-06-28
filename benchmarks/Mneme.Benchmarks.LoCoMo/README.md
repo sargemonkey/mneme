@@ -69,6 +69,31 @@ Optional: `MNEME_EMBED_BASE_URL` / `MNEME_EMBED_API_KEY` if embeddings live on
 a different endpoint than chat. `--k <int>` sets retrieval depth (default 10);
 `--limit <n>` caps the number of conversations.
 
+## Resuming + outputs (rate-limit friendly)
+
+Every graded question is appended to `results.jsonl` immediately, so a run that
+hits a rate limit or is `Ctrl-C`'d can be **resumed**: re-run the same command
+and it skips every question already in the file (no repeated LLM calls) and
+replays their grades into the aggregate. Whole conversations that are fully
+graded skip ingest + embedding entirely.
+
+```pwsh
+# Outputs default to <build-dir>/locomo-results/. Override with --out:
+dotnet run -c Release --project benchmarks/Mneme.Benchmarks.LoCoMo -- --dataset locomo10.json --out C:\runs\mneme-locomo
+
+# ... interrupt any time (Ctrl-C). Then resume — same command, picks up where it stopped:
+dotnet run -c Release --project benchmarks/Mneme.Benchmarks.LoCoMo -- --dataset locomo10.json --out C:\runs\mneme-locomo
+
+# Start over from scratch:
+dotnet run -c Release --project benchmarks/Mneme.Benchmarks.LoCoMo -- --dataset locomo10.json --out C:\runs\mneme-locomo --fresh
+```
+
+Two artifacts land in the output directory:
+- **`results.jsonl`** — one JSON object per graded question (the resume log).
+- **`results.csv`** — `sample_id, question_index, category_id, category, correct,
+  context_tokens, question, gold, predicted` — open in a spreadsheet for error
+  analysis (filter `correct=0` to see every miss with its retrieved-context size).
+
 ## Run it — dry-run (offline, no keys)
 
 With no `MNEME_LLM_*` env set, the harness runs fully offline against a bundled

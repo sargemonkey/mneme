@@ -29,14 +29,33 @@ public sealed class LoCoMoEvaluator
         Directory.CreateDirectory(dataRoot);
     }
 
-    public async Task<LoCoMoReport> RunAsync(IReadOnlyList<LoCoMoSample> samples, CancellationToken ct = default)
+    public async Task<LoCoMoReport> RunAsync(IReadOnlyList<LoCoMoSample> samples, RunStore? store = null, CancellationToken ct = default)
     {
-        var rows = new List<QaResult>();
+        var existing = store?.LoadExisting() ?? new Dictionary<(string, int), QaRecord>();
+        if (existing.Count > 0)
+        {
+            Console.Error.WriteLine($"Resuming: {existing.Count} question(s) already graded — they will be skipped.");
+        }
+        var records = new List<QaRecord>();
         var sampleIndex = 0;
         foreach (var sample in samples)
         {
             ct.ThrowIfCancellationRequested();
             sampleIndex++;
+
+            // Skip ingest/embed entirely if every question in this sample is done.
+            var allDone = sample.Questions.Count > 0 &&
+                Enumerable.Range(0, sample.Questions.Count).All(qi => existing.ContainsKey((sample.SampleId, qi)));
+            if (allDone)
+            {
+                for (var qi = 0; qi < sample.Questions.Count; qi++)
+                {
+                    records.Add(existing[(sample.SampleId, qi)]);
+                }
+                Console.Error.WriteLine($"[{sampleIndex}/{samples.Count}] {sample.SampleId}: all {sample.Questions.Count} cached, skipping.");
+                continue;
+            }
+
             Console.Error.WriteLine($"[{sampleIndex}/{samples.Count}] {sample.SampleId}: " +
                                     $"{sample.Turns.Count} turns, {sample.Questions.Count} questions");
 
@@ -61,10 +80,16 @@ public sealed class LoCoMoEvaluator
             // Embed for semantic retrieval.
             await vectors.BackfillAsync(new WorkstreamId(sample.SampleId), ct).ConfigureAwait(false);
 
-            // Answer + judge each question.
-            foreach (var qa in sample.Questions)
+            // Answer + judge each question (skipping any already graded).
+            for (var qi = 0; qi < sample.Questions.Count; qi++)
             {
                 ct.ThrowIfCancellationRequested();
+                if (existing.TryGetValue((sample.SampleId, qi), out var cached))
+                {
+                    records.Add(cached);
+                    continue;
+                }
+                var qa = sample.Questions[qi];
                 var result = await query.QueryAsync(new QueryRequest(
                     new QuerySpec(new WorkstreamId(sample.SampleId), FreeText: qa.Question, Limit: _topK)),
                     token, ct).ConfigureAwait(false);
@@ -74,11 +99,14 @@ public sealed class LoCoMoEvaluator
                 var predicted = await _answerer.AnswerAsync(qa.Question, context, ct).ConfigureAwait(false);
                 var correct = await _judge.IsCorrectAsync(qa.Question, qa.Answer, predicted, ct).ConfigureAwait(false);
 
-                rows.Add(new QaResult(sample.SampleId, qa.CategoryId, qa.CategoryLabel, correct, contextTokens));
+                var record = new QaRecord(sample.SampleId, qi, qa.CategoryId, qa.CategoryLabel,
+                    qa.Question, qa.Answer, predicted, correct, contextTokens);
+                records.Add(record);
+                store?.Append(record); // durable after every graded question → resumable
             }
         }
 
-        return LoCoMoReport.Aggregate(rows, _embedder.Id, _answerer.Id, _judge.Id, _topK);
+        return LoCoMoReport.Aggregate(records, _embedder.Id, _answerer.Id, _judge.Id, _topK);
     }
 
     private (IMemoryAgent agent, IMemoryQueryAPI query, CapabilityToken token, VectorIndex vectors)
@@ -107,9 +135,6 @@ public sealed class LoCoMoEvaluator
         (int)Math.Ceiling(s.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length / 0.75);
 }
 
-/// <summary>One graded question.</summary>
-public sealed record QaResult(string SampleId, int CategoryId, string CategoryLabel, bool Correct, int ContextTokens);
-
 /// <summary>Aggregated LoCoMo scores: overall + per-category accuracy and mean context tokens.</summary>
 public sealed record LoCoMoReport(
     int Total,
@@ -122,7 +147,7 @@ public sealed record LoCoMoReport(
     string JudgeId,
     int TopK)
 {
-    public static LoCoMoReport Aggregate(IReadOnlyList<QaResult> rows, string embedderId, string answererId, string judgeId, int topK)
+    public static LoCoMoReport Aggregate(IReadOnlyList<QaRecord> rows, string embedderId, string answererId, string judgeId, int topK)
     {
         var total = rows.Count;
         var correct = rows.Count(r => r.Correct);
