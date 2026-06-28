@@ -112,6 +112,82 @@ public sealed class VectorSearchTests : IDisposable
         Assert.Single(result.Items);
     }
 
+    [Fact]
+    public async Task Reranker_reorders_hybrid_candidates()
+    {
+        // The retriever ranks by hybrid score; a registered reranker gets the
+        // pool and imposes its own order. This fake reranker prefers the
+        // candidate whose text contains "PICKME", proving the rerank stage
+        // runs and its order wins.
+        using var sp = BuildWithReranker("rr-ws", new KeywordReranker("pickme"));
+        var agent = sp.GetRequiredService<IMemoryAgent>();
+        var query = sp.GetRequiredService<IMemoryQueryAPI>();
+        var vectors = sp.GetRequiredService<VectorIndex>();
+        var token = sp.GetRequiredService<CapabilityToken>();
+        var ws = new WorkstreamId("rr-ws");
+
+        await agent.IngestAsync(Evidence("a", "rr-ws", "the meeting is about budgets"));
+        await agent.IngestAsync(Evidence("b", "rr-ws", "the meeting notes mention PICKME clearly"));
+        await agent.IngestAsync(Evidence("c", "rr-ws", "the meeting room was cold"));
+        await vectors.BackfillAsync(ws);
+
+        var result = await query.QueryAsync(new QueryRequest(
+            new QuerySpec(ws, FreeText: "meeting", Limit: 3), Explain: true), token);
+        Assert.Contains("+rerank", result.Explain!.DispatcherChoice);
+        Assert.Equal("b", result.Items[0].EventId.Value); // reranker floated PICKME to the top
+    }
+
+    [Fact]
+    public async Task No_reranker_leaves_order_unchanged()
+    {
+        using var sp = Build(new BagOfWordsEmbedder(), "rr-none");
+        var agent = sp.GetRequiredService<IMemoryAgent>();
+        var query = sp.GetRequiredService<IMemoryQueryAPI>();
+        var vectors = sp.GetRequiredService<VectorIndex>();
+        var token = sp.GetRequiredService<CapabilityToken>();
+        var ws = new WorkstreamId("rr-none");
+        await agent.IngestAsync(Evidence("x", "rr-none", "alpha beta"));
+        await vectors.BackfillAsync(ws);
+
+        var result = await query.QueryAsync(new QueryRequest(
+            new QuerySpec(ws, FreeText: "alpha"), Explain: true), token);
+        Assert.DoesNotContain("+rerank", result.Explain!.DispatcherChoice);
+        Assert.Single(result.Items);
+    }
+
+    private ServiceProvider BuildWithReranker(string ws, IReranker reranker)
+    {
+        var services = new ServiceCollection();
+        services.AddMneme(o =>
+        {
+            o.WorkstreamId = ws;
+            o.SqlitePath = Path.Combine(_tmpDir, ws + ".db");
+            o.UserId = "alice";
+        });
+        services.AddSingleton<IEmbeddingProvider>(new BagOfWordsEmbedder());
+        services.AddSingleton(reranker);
+        return services.BuildServiceProvider();
+    }
+
+    /// <summary>Fake reranker that floats candidates containing a keyword to the top.</summary>
+    private sealed class KeywordReranker : IReranker
+    {
+        private readonly string _keyword;
+        public KeywordReranker(string keyword) { _keyword = keyword; }
+        public string Id => $"test/keyword-rerank:{_keyword}";
+
+        public Task<IReadOnlyList<RerankResult>> RerankAsync(string query, IReadOnlyList<RerankCandidate> candidates, int topK, CancellationToken ct = default)
+        {
+            var ranked = candidates
+                .Select((c, i) => new RerankResult(c.EventId,
+                    c.Text.Contains(_keyword, StringComparison.OrdinalIgnoreCase) ? 1000.0 : 1.0 - i * 0.01))
+                .OrderByDescending(r => r.Score)
+                .Take(topK)
+                .ToArray();
+            return Task.FromResult<IReadOnlyList<RerankResult>>(ranked);
+        }
+    }
+
     /// <summary>
     /// Deterministic offline embedder: bag-of-words hashed into a fixed-size
     /// vector so texts sharing words get similar vectors. No network, fully

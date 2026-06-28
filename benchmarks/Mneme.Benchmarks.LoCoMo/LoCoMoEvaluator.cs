@@ -31,17 +31,19 @@ public sealed class LoCoMoEvaluator
     private readonly IAnswerer _answerer;
     private readonly IJudge _judge;
     private readonly ISessionDistiller? _distiller;
+    private readonly IReranker? _reranker;
     private readonly IngestMode _mode;
     private readonly int _topK;
 
     public LoCoMoEvaluator(string dataRoot, IEmbeddingProvider embedder, IAnswerer answerer, IJudge judge,
-        ISessionDistiller? distiller, IngestMode mode, int topK)
+        ISessionDistiller? distiller, IReranker? reranker, IngestMode mode, int topK)
     {
         _dataRoot = dataRoot;
         _embedder = embedder;
         _answerer = answerer;
         _judge = judge;
         _distiller = distiller;
+        _reranker = reranker;
         _mode = mode;
         _topK = topK;
         if (mode is IngestMode.Facts or IngestMode.Both && distiller is null)
@@ -137,7 +139,7 @@ public sealed class LoCoMoEvaluator
         }
 
         return LoCoMoReport.Aggregate(records, _embedder.Id, _answerer.Id, _judge.Id, _topK,
-            _mode.ToString().ToLowerInvariant(), _distiller?.Id ?? "(none)");
+            _mode.ToString().ToLowerInvariant(), _distiller?.Id ?? "(none)", _reranker?.Id ?? "(none)");
     }
 
     // Chunk the conversation and run Mneme's session distiller over each window,
@@ -175,6 +177,7 @@ public sealed class LoCoMoEvaluator
         });
         services.AddSingleton(_embedder);
         if (_distiller is not null) services.AddSingleton(_distiller);
+        if (_reranker is not null) services.AddSingleton(_reranker);
         var sp = services.BuildServiceProvider();
         return (sp.GetRequiredService<IMemoryAgent>(),
                 sp.GetRequiredService<IMemoryQueryAPI>(),
@@ -199,10 +202,11 @@ public sealed record LoCoMoReport(
     string JudgeId,
     int TopK,
     string IngestMode,
-    string DistillerId)
+    string DistillerId,
+    string RerankerId)
 {
     public static LoCoMoReport Aggregate(IReadOnlyList<QaRecord> rows, string embedderId, string answererId,
-        string judgeId, int topK, string ingestMode, string distillerId)
+        string judgeId, int topK, string ingestMode, string distillerId, string rerankerId)
     {
         var total = rows.Count;
         var correct = rows.Count(r => r.Correct);
@@ -216,7 +220,7 @@ public sealed record LoCoMoReport(
             total, correct,
             total == 0 ? 0 : (double)correct / total,
             total == 0 ? 0 : rows.Average(r => r.ContextTokens),
-            byCat, embedderId, answererId, judgeId, topK, ingestMode, distillerId);
+            byCat, embedderId, answererId, judgeId, topK, ingestMode, distillerId, rerankerId);
     }
 
     public string ToConsole()
@@ -226,6 +230,7 @@ public sealed record LoCoMoReport(
         sb.AppendLine("================ LoCoMo Results ================");
         sb.AppendLine($"  ingest   : {IngestMode}");
         sb.AppendLine($"  distiller: {DistillerId}");
+        sb.AppendLine($"  reranker : {RerankerId}");
         sb.AppendLine($"  embedder : {EmbedderId}");
         sb.AppendLine($"  answerer : {AnswererId}");
         sb.AppendLine($"  judge    : {JudgeId}");
@@ -256,6 +261,7 @@ public sealed record LoCoMoReport(
         sb.AppendLine();
         sb.AppendLine($"- **Run:** {DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm} UTC");
         sb.AppendLine($"- **Ingest mode:** {IngestMode}  (distiller: `{DistillerId}`)");
+        sb.AppendLine($"- **Reranker:** `{RerankerId}`");
         sb.AppendLine($"- **Embedder:** `{EmbedderId}`");
         sb.AppendLine($"- **Answerer:** `{AnswererId}`");
         sb.AppendLine($"- **Judge:** `{JudgeId}`");

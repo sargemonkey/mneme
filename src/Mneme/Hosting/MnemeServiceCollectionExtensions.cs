@@ -118,7 +118,8 @@ public static class MnemeServiceCollectionExtensions
             sp.GetRequiredService<TextSearchService>(),
             sp.GetRequiredService<TimeProvider>(),
             sp.GetService<IDistiller>(),
-            sp.GetRequiredService<VectorIndex>()));
+            sp.GetRequiredService<VectorIndex>(),
+            sp.GetService<IReranker>()));
         services.TryAddSingleton<IMemoryCurator>(sp => new SqliteMemoryCurator(
             sp.GetRequiredService<SqliteConnectionFactory>(),
             sp.GetRequiredService<TimeProvider>()));

@@ -67,7 +67,10 @@ internal static class Program
         };
 
         var (embedder, answerer, judge, distiller, mode) = BuildClients(args);
-        Console.Error.WriteLine($"Mode: {mode}   ingest: {ingestMode.ToString().ToLowerInvariant()}");
+        var reranker = args.Contains("--rerank") && answerer is IChatCompletion chat
+            ? new LlmReranker(chat) : null;
+        Console.Error.WriteLine($"Mode: {mode}   ingest: {ingestMode.ToString().ToLowerInvariant()}" +
+                                (reranker is not null ? "   rerank: on" : ""));
 
         var dataRoot = Path.Combine(AppContext.BaseDirectory, "locomo-data");
         var outDir = GetArg(args, "--out") ?? Path.Combine(AppContext.BaseDirectory, "locomo-results");
@@ -78,7 +81,7 @@ internal static class Program
             Console.Error.WriteLine("--fresh: cleared any prior results, starting over.");
         }
 
-        var evaluator = new LoCoMoEvaluator(dataRoot, embedder, answerer, judge, distiller, ingestMode, topK);
+        var evaluator = new LoCoMoEvaluator(dataRoot, embedder, answerer, judge, distiller, reranker, ingestMode, topK);
 
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };

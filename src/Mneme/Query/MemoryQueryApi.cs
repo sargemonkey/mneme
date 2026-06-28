@@ -43,29 +43,35 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
     private const int HardLimit = 500;
     private const string Distiller = "phase4-degraded";
     private const double SemanticThreshold = 0.1;
+    private const int RerankPool = 40;
 
     private readonly SqliteConnectionFactory _connections;
     private readonly TextSearchService _search;
     private readonly TimeProvider _clock;
     private readonly IDistiller? _distiller;
     private readonly VectorIndex? _vectors;
+    private readonly IReranker? _reranker;
     private readonly Mneme.Distillation.DistillationRequestBuilder _requestBuilder;
     private readonly Mneme.Distillation.DistillationCache _cache;
 
     /// <summary>Construct against the shared connection factory + text search service.</summary>
     public MemoryQueryApi(SqliteConnectionFactory connections, TextSearchService search)
-        : this(connections, search, TimeProvider.System, distiller: null, vectors: null) { }
+        : this(connections, search, TimeProvider.System, distiller: null, vectors: null, reranker: null) { }
 
     /// <summary>Construct with a custom clock (tests).</summary>
     public MemoryQueryApi(SqliteConnectionFactory connections, TextSearchService search, TimeProvider clock)
-        : this(connections, search, clock, distiller: null, vectors: null) { }
+        : this(connections, search, clock, distiller: null, vectors: null, reranker: null) { }
 
     /// <summary>Construct with an optional <see cref="IDistiller"/> (no vector index).</summary>
     public MemoryQueryApi(SqliteConnectionFactory connections, TextSearchService search, TimeProvider clock, IDistiller? distiller)
-        : this(connections, search, clock, distiller, vectors: null) { }
+        : this(connections, search, clock, distiller, vectors: null, reranker: null) { }
 
-    /// <summary>Construct with everything including an optional <see cref="IDistiller"/> and <see cref="VectorIndex"/>.</summary>
+    /// <summary>Construct with an optional <see cref="IDistiller"/> and <see cref="VectorIndex"/>.</summary>
     public MemoryQueryApi(SqliteConnectionFactory connections, TextSearchService search, TimeProvider clock, IDistiller? distiller, VectorIndex? vectors)
+        : this(connections, search, clock, distiller, vectors, reranker: null) { }
+
+    /// <summary>Construct with everything including an optional <see cref="IReranker"/>.</summary>
+    public MemoryQueryApi(SqliteConnectionFactory connections, TextSearchService search, TimeProvider clock, IDistiller? distiller, VectorIndex? vectors, IReranker? reranker)
     {
         ArgumentNullException.ThrowIfNull(connections);
         ArgumentNullException.ThrowIfNull(search);
@@ -75,6 +81,7 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
         _clock = clock;
         _distiller = distiller;
         _vectors = vectors;
+        _reranker = reranker;
         _requestBuilder = new Mneme.Distillation.DistillationRequestBuilder(connections);
         _cache = new Mneme.Distillation.DistillationCache(connections);
     }
@@ -95,26 +102,40 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
         }
         var limit = Math.Clamp(spec.Limit, 1, HardLimit);
 
+        // When a reranker is registered and the query has free text, retrieve a
+        // wider candidate pool first, then let the cross-encoder pick the final
+        // top-k (two-stage retrieve-then-rerank).
+        var hasFreeText = !string.IsNullOrWhiteSpace(spec.FreeText);
+        var willRerank = _reranker is not null && hasFreeText;
+        var retrieveLimit = willRerank ? Math.Min(HardLimit, Math.Max(limit, RerankPool)) : limit;
+
         using var activity = MnemeActivitySource.Source.StartActivity(
             MnemeActivitySource.QueryExecute, ActivityKind.Internal);
         activity?.SetTag("mneme.query.cross_workstream", resolved.CrossWorkstream);
-        activity?.SetTag("mneme.query.has_free_text", !string.IsNullOrWhiteSpace(spec.FreeText));
+        activity?.SetTag("mneme.query.has_free_text", hasFreeText);
         activity?.SetTag("mneme.query.as_of", spec.AsOf?.ToString("O"));
 
         (IReadOnlyList<QueryResultItem> Items, int TotalMatched, string Dispatcher, int Considered, int Gated) outcome;
         if (string.IsNullOrWhiteSpace(spec.FreeText))
         {
-            outcome = StructuredScan(spec, resolved, limit, request.Explain);
+            outcome = StructuredScan(spec, resolved, retrieveLimit, request.Explain);
         }
         else if (_vectors is { IsEnabled: true } && !resolved.CrossWorkstream)
         {
-            outcome = await HybridSearch(spec, resolved, limit, request.Explain, ct).ConfigureAwait(false);
+            outcome = await HybridSearch(spec, resolved, retrieveLimit, request.Explain, ct).ConfigureAwait(false);
         }
         else
         {
-            outcome = FreeTextSearch(spec, resolved, limit, request.Explain);
+            outcome = FreeTextSearch(spec, resolved, retrieveLimit, request.Explain);
         }
         var (items, totalMatched, dispatcher, candidatesConsidered, gatedOut) = outcome;
+
+        if (willRerank && items.Count > 0)
+        {
+            items = await RerankAsync(spec.FreeText!, items, limit, ct).ConfigureAwait(false);
+            dispatcher += "+rerank";
+            totalMatched = items.Count;
+        }
 
         QueryExplain? explain = null;
         if (request.Explain)
@@ -505,6 +526,32 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
                 Details: details));
         }
         return (items, items.Count, "hybrid-semantic-bm25", fused.Count, gated);
+    }
+
+    // Two-stage reranking: hand the retrieved candidate pool to the host
+    // reranker (cross-encoder / hosted rerank API / LLM) and keep its top-k
+    // ordering. The rerank score replaces the retrieval score; if the reranker
+    // returns an id the retriever didn't (it shouldn't), that id is ignored.
+    private async Task<IReadOnlyList<QueryResultItem>> RerankAsync(
+        string query, IReadOnlyList<QueryResultItem> items, int limit, CancellationToken ct)
+    {
+        var candidates = items.Select(i => new RerankCandidate(i.EventId, i.Summary)).ToList();
+        var ranked = await _reranker!.RerankAsync(query, candidates, limit, ct).ConfigureAwait(false);
+
+        var byId = items.ToDictionary(i => i.EventId.Value);
+        var result = new List<QueryResultItem>(Math.Min(limit, ranked.Count));
+        foreach (var r in ranked)
+        {
+            if (!byId.TryGetValue(r.EventId.Value, out var item)) continue;
+            var details = item.Details is { } d
+                ? d with { Final = r.Score, GateReason = "reranked" }
+                : null;
+            result.Add(item with { Score = r.Score, Details = details });
+            if (result.Count >= limit) break;
+        }
+        // Defensive: if the reranker dropped everything, fall back to the
+        // retrieval order trimmed to limit.
+        return result.Count > 0 ? result : items.Take(limit).ToList();
     }
 
     private EventId? GetLastEventId(WorkstreamId workstream)
