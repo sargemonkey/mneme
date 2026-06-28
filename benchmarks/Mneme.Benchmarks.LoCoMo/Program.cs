@@ -89,9 +89,12 @@ internal static class Program
         }
 
         var csvPath = store.ExportCsv(store.LoadExisting().Values.OrderBy(r => r.SampleId).ThenBy(r => r.QuestionIndex));
+        var mdPath = Path.ChangeExtension(store.JsonlPath, ".md");
+        File.WriteAllText(mdPath, report.ToMarkdown());
         Console.WriteLine(report.ToConsole());
         Console.Error.WriteLine($"Per-question grades: {store.JsonlPath}");
-        Console.Error.WriteLine($"CSV export        : {csvPath}");
+        Console.Error.WriteLine($"CSV export         : {csvPath}");
+        Console.Error.WriteLine($"Markdown report    : {mdPath}");
 
         if (mode.StartsWith("dry-run", StringComparison.Ordinal))
         {

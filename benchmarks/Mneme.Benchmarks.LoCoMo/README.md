@@ -93,6 +93,9 @@ Two artifacts land in the output directory:
 - **`results.csv`** — `sample_id, question_index, category_id, category, correct,
   context_tokens, question, gold, predicted` — open in a spreadsheet for error
   analysis (filter `correct=0` to see every miss with its retrieved-context size).
+- **`results.md`** — a ready-to-paste Markdown report: run metadata (models,
+  top-k, mean context tokens), per-category accuracy, and a reference row with
+  the latest published Mem0 / Zep LoCoMo numbers for side-by-side context.
 
 ## Run it — dry-run (offline, no keys)
 

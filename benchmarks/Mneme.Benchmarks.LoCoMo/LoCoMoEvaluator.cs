@@ -185,6 +185,49 @@ public sealed record LoCoMoReport(
         sb.AppendLine("================================================");
         return sb.ToString();
     }
+
+    /// <summary>
+    /// Render results as a ready-to-paste Markdown report, including a
+    /// reference row of the latest published Mem0 / Zep LoCoMo numbers so the
+    /// comparison is in one place. Reference figures are static and sourced
+    /// (see footnotes); they are NOT produced by this harness.
+    /// </summary>
+    public string ToMarkdown()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("# Mneme — LoCoMo results");
+        sb.AppendLine();
+        sb.AppendLine($"- **Run:** {DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm} UTC");
+        sb.AppendLine($"- **Embedder:** `{EmbedderId}`");
+        sb.AppendLine($"- **Answerer:** `{AnswererId}`");
+        sb.AppendLine($"- **Judge:** `{JudgeId}`");
+        sb.AppendLine($"- **Retrieval depth (top-k):** {TopK}");
+        sb.AppendLine($"- **Mean context tokens / query:** {MeanContextTokens:F0}");
+        sb.AppendLine();
+        sb.AppendLine("## Accuracy by category");
+        sb.AppendLine();
+        sb.AppendLine("| Category | n | Correct | Accuracy |");
+        sb.AppendLine("|---|---:|---:|---:|");
+        foreach (var c in Categories)
+        {
+            sb.AppendLine($"| {c.Label} | {c.Total} | {c.Correct} | {c.Accuracy:P1} |");
+        }
+        sb.AppendLine($"| **Overall** | **{Total}** | **{Correct}** | **{Accuracy:P1}** |");
+        sb.AppendLine();
+        sb.AppendLine("## Reference: published LoCoMo overall (other memory layers)");
+        sb.AppendLine();
+        sb.AppendLine("| System | LoCoMo overall | Mean tokens / retrieval | Source |");
+        sb.AppendLine("|---|---:|---:|---|");
+        sb.AppendLine($"| **Mneme (this run)** | **{Accuracy:P1}** | **{MeanContextTokens:F0}** | this harness |");
+        sb.AppendLine("| Mem0 | 92.5% | ~6,956 | mem0.ai/research (data May 2026) |");
+        sb.AppendLine("| Zep | — (LongMemEval 71.2% w/ gpt-4o) | ~1,600 | getzep.com SOTA paper (Jan 2025) |");
+        sb.AppendLine();
+        sb.AppendLine("> Reference numbers are static, model-dependent, and measured by their");
+        sb.AppendLine("> authors — not reproduced here. For a fair head-to-head, run this harness");
+        sb.AppendLine("> with the same answer/judge model the reference used and hold retrieval");
+        sb.AppendLine("> depth fixed; the only variable should be the memory layer.");
+        return sb.ToString();
+    }
 }
 
 /// <summary>Per-category score line.</summary>
