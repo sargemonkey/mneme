@@ -58,8 +58,16 @@ internal static class Program
         if (samples.Count > limit) samples = samples.Take(limit).ToList();
         Console.Error.WriteLine($"Loaded {samples.Count} sample(s) from {Path.GetFileName(dataset)}.");
 
-        var (embedder, answerer, judge, mode) = BuildClients();
-        Console.Error.WriteLine($"Mode: {mode}");
+        var ingestArg = (GetArg(args, "--ingest") ?? "facts").Trim().ToLowerInvariant();
+        var ingestMode = ingestArg switch
+        {
+            "turns" => IngestMode.Turns,
+            "both" => IngestMode.Both,
+            _ => IngestMode.Facts,
+        };
+
+        var (embedder, answerer, judge, distiller, mode) = BuildClients(args);
+        Console.Error.WriteLine($"Mode: {mode}   ingest: {ingestMode.ToString().ToLowerInvariant()}");
 
         var dataRoot = Path.Combine(AppContext.BaseDirectory, "locomo-data");
         var outDir = GetArg(args, "--out") ?? Path.Combine(AppContext.BaseDirectory, "locomo-results");
@@ -70,7 +78,7 @@ internal static class Program
             Console.Error.WriteLine("--fresh: cleared any prior results, starting over.");
         }
 
-        var evaluator = new LoCoMoEvaluator(dataRoot, embedder, answerer, judge, topK);
+        var evaluator = new LoCoMoEvaluator(dataRoot, embedder, answerer, judge, distiller, ingestMode, topK);
 
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
@@ -104,14 +112,14 @@ internal static class Program
         return 0;
     }
 
-    private static (IEmbeddingProvider embedder, IAnswerer answerer, IJudge judge, string mode) BuildClients()
+    private static (IEmbeddingProvider embedder, IAnswerer answerer, IJudge judge, ISessionDistiller? distiller, string mode)
+        BuildClients(string[] args)
     {
         var provider = (Environment.GetEnvironmentVariable("MNEME_LLM_PROVIDER") ?? "").Trim().ToLowerInvariant();
+        var rpm = double.TryParse(GetArg(args, "--rpm") ?? Environment.GetEnvironmentVariable("MNEME_LLM_RPM"), out var r) ? r : 10.0;
+        var maxRetries = int.TryParse(Environment.GetEnvironmentVariable("MNEME_LLM_MAX_RETRIES"), out var mr) ? mr : 8;
 
         // --- GitHub Models (the "use Copilot / GitHub models" path) ---------
-        // OpenAI-compatible inference over https://models.github.ai/inference,
-        // authenticated with a GitHub token carrying the models:read scope.
-        // Model ids are publisher-prefixed (openai/gpt-4o-mini).
         if (provider is "github-models" or "github" or "copilot")
         {
             var token = Environment.GetEnvironmentVariable("GITHUB_TOKEN")
@@ -121,7 +129,7 @@ internal static class Program
             {
                 Console.Error.WriteLine("github-models requires a GitHub token with 'models:read' in GITHUB_TOKEN.");
                 Console.Error.WriteLine("Falling back to offline dry-run.");
-                return (new OfflineEmbedder(), new OfflineAnswerer(), new OfflineJudge(), "dry-run (no GITHUB_TOKEN)");
+                return Offline();
             }
             const string ghBase = "https://models.github.ai";
             var ghHeaders = new Dictionary<string, string>
@@ -133,9 +141,12 @@ internal static class Program
             var embModel = Environment.GetEnvironmentVariable("MNEME_EMBED_MODEL") ?? "openai/text-embedding-3-small";
             var embDim = int.TryParse(Environment.GetEnvironmentVariable("MNEME_EMBED_DIM"), out var gd) ? gd : 1536;
 
-            var ghChat = new OpenAICompatibleChat(ghBase, token, chatModel, "inference/chat/completions", ghHeaders);
-            var ghEmbed = new OpenAICompatibleEmbedder(ghBase, token, embModel, embDim, "inference/embeddings", ghHeaders);
-            return (ghEmbed, ghChat, ghChat, $"github-models ({chatModel} + {embModel})");
+            // One shared ThrottledHttp so chat + embeddings draw from one rate budget.
+            var http = new ThrottledHttp(ghBase, token, rpm, maxRetries, ghHeaders);
+            var ghChat = new OpenAICompatibleChat(http, chatModel, "inference/chat/completions");
+            var ghEmbed = new OpenAICompatibleEmbedder(http, embModel, embDim, "inference/embeddings");
+            return (ghEmbed, ghChat, ghChat, new LlmSessionDistiller(ghChat),
+                $"github-models ({chatModel} + {embModel}, {rpm:0} rpm)");
         }
 
         // --- Generic OpenAI-compatible endpoint -----------------------------
@@ -145,7 +156,7 @@ internal static class Program
 
         if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(model))
         {
-            return (new OfflineEmbedder(), new OfflineAnswerer(), new OfflineJudge(), "dry-run (offline; not a real score)");
+            return Offline();
         }
 
         var embedModel = Environment.GetEnvironmentVariable("MNEME_EMBED_MODEL") ?? "text-embedding-3-small";
@@ -153,9 +164,17 @@ internal static class Program
         var embedBaseUrl = Environment.GetEnvironmentVariable("MNEME_EMBED_BASE_URL") ?? baseUrl;
         var embedKey = Environment.GetEnvironmentVariable("MNEME_EMBED_API_KEY") ?? apiKey;
 
-        var chat = new OpenAICompatibleChat(baseUrl, apiKey, model);
-        var embedder = new OpenAICompatibleEmbedder(embedBaseUrl, embedKey, embedModel, embedDim);
-        return (embedder, chat, chat, $"live ({model} + {embedModel})");
+        var chatHttp = new ThrottledHttp(baseUrl, apiKey, rpm, maxRetries);
+        var chat = new OpenAICompatibleChat(chatHttp, model);
+        var embedHttp = embedBaseUrl == baseUrl && embedKey == apiKey
+            ? chatHttp : new ThrottledHttp(embedBaseUrl, embedKey, rpm, maxRetries);
+        var embedder = new OpenAICompatibleEmbedder(embedHttp, embedModel, embedDim);
+        return (embedder, chat, chat, new LlmSessionDistiller(chat),
+            $"live ({model} + {embedModel}, {rpm:0} rpm)");
+
+        static (IEmbeddingProvider, IAnswerer, IJudge, ISessionDistiller?, string) Offline() =>
+            (new OfflineEmbedder(), new OfflineAnswerer(), new OfflineJudge(),
+             new LlmSessionDistiller(new OfflineChatCompletion()), "dry-run (offline; not a real score)");
     }
 
     private static string? GetArg(string[] args, string name)

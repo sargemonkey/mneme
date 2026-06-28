@@ -63,30 +63,29 @@ public sealed class OfflineJudge : IJudge
 
 // ---------------------------------------------------------------------------
 // OpenAI-compatible HTTP implementations — turnkey for a REAL run. They speak
-// the /v1/chat/completions and /v1/embeddings REST shape, so they work against
-// OpenAI, Azure OpenAI, Ollama, vLLM, LM Studio, or any compatible gateway by
-// pointing the base URL + key at it. No SDK dependency; just HttpClient + JSON.
+// the chat/completions + embeddings REST shape (path configurable), so they
+// work against OpenAI, Azure, GitHub Models, Ollama, vLLM, or any compatible
+// gateway. All requests flow through a shared ThrottledHttp for rate limiting
+// + retry, so a long run survives GitHub Models' free-tier limits.
 // ---------------------------------------------------------------------------
 
-public sealed class OpenAICompatibleChat : IAnswerer, IJudge, IDisposable
+/// <summary>Generic single-shot chat completion (used by the session distiller).</summary>
+public interface IChatCompletion
 {
-    private readonly HttpClient _http;
+    string Id { get; }
+    Task<string> CompleteAsync(string system, string user, CancellationToken ct = default);
+}
+
+public sealed class OpenAICompatibleChat : IAnswerer, IJudge, IChatCompletion
+{
+    private readonly ThrottledHttp _http;
     private readonly string _model;
     private readonly string _chatPath;
     public string Id { get; }
 
-    public OpenAICompatibleChat(string baseUrl, string apiKey, string model,
-        string chatPath = "v1/chat/completions", IReadOnlyDictionary<string, string>? extraHeaders = null)
+    public OpenAICompatibleChat(ThrottledHttp http, string model, string chatPath = "v1/chat/completions")
     {
-        _http = new HttpClient { BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/"), Timeout = TimeSpan.FromSeconds(120) };
-        if (!string.IsNullOrEmpty(apiKey))
-        {
-            _http.DefaultRequestHeaders.Authorization = new("Bearer", apiKey);
-        }
-        if (extraHeaders is not null)
-        {
-            foreach (var (k, v) in extraHeaders) _http.DefaultRequestHeaders.TryAddWithoutValidation(k, v);
-        }
+        _http = http;
         _model = model;
         _chatPath = chatPath;
         Id = $"openai-compatible/{model}";
@@ -103,7 +102,7 @@ public sealed class OpenAICompatibleChat : IAnswerer, IJudge, IDisposable
                      "support. Answer concisely — a word, phrase, date, or short list. Only answer " +
                      "\"I don't know\" if the snippets give no basis at all.";
         var user = $"Memory snippets:\n{ctx}\n\nQuestion: {question}\nShort answer:";
-        return await ChatAsync(system, user, ct).ConfigureAwait(false);
+        return await CompleteAsync(system, user, ct).ConfigureAwait(false);
     }
 
     public async Task<bool> IsCorrectAsync(string question, string gold, string predicted, CancellationToken ct = default)
@@ -112,11 +111,11 @@ public sealed class OpenAICompatibleChat : IAnswerer, IJudge, IDisposable
                      "semantically correct given the gold answer, otherwise 'NO'. Minor wording " +
                      "differences are fine; the meaning must match.";
         var user = $"Question: {question}\nGold answer: {gold}\nPredicted answer: {predicted}\nCorrect (YES/NO)?";
-        var reply = await ChatAsync(system, user, ct).ConfigureAwait(false);
+        var reply = await CompleteAsync(system, user, ct).ConfigureAwait(false);
         return reply.TrimStart().StartsWith("YES", StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task<string> ChatAsync(string system, string user, CancellationToken ct)
+    public async Task<string> CompleteAsync(string system, string user, CancellationToken ct = default)
     {
         var body = new
         {
@@ -128,36 +127,23 @@ public sealed class OpenAICompatibleChat : IAnswerer, IJudge, IDisposable
                 new { role = "user", content = user },
             },
         };
-        using var resp = await _http.PostAsJsonAsync(_chatPath, body, ct).ConfigureAwait(false);
-        resp.EnsureSuccessStatusCode();
-        using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false));
+        using var doc = await _http.PostJsonAsync(_chatPath, body, ct).ConfigureAwait(false);
         return doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? "";
     }
-
-    public void Dispose() => _http.Dispose();
 }
 
 /// <summary>OpenAI-compatible embedding provider (Mneme's <see cref="IEmbeddingProvider"/>).</summary>
-public sealed class OpenAICompatibleEmbedder : IEmbeddingProvider, IDisposable
+public sealed class OpenAICompatibleEmbedder : IEmbeddingProvider
 {
-    private readonly HttpClient _http;
+    private readonly ThrottledHttp _http;
     private readonly string _model;
     private readonly string _embedPath;
     public string Id { get; }
     public int Dimensions { get; }
 
-    public OpenAICompatibleEmbedder(string baseUrl, string apiKey, string model, int dimensions,
-        string embedPath = "v1/embeddings", IReadOnlyDictionary<string, string>? extraHeaders = null)
+    public OpenAICompatibleEmbedder(ThrottledHttp http, string model, int dimensions, string embedPath = "v1/embeddings")
     {
-        _http = new HttpClient { BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/"), Timeout = TimeSpan.FromSeconds(120) };
-        if (!string.IsNullOrEmpty(apiKey))
-        {
-            _http.DefaultRequestHeaders.Authorization = new("Bearer", apiKey);
-        }
-        if (extraHeaders is not null)
-        {
-            foreach (var (k, v) in extraHeaders) _http.DefaultRequestHeaders.TryAddWithoutValidation(k, v);
-        }
+        _http = http;
         _model = model;
         _embedPath = embedPath;
         Dimensions = dimensions;
@@ -166,10 +152,7 @@ public sealed class OpenAICompatibleEmbedder : IEmbeddingProvider, IDisposable
 
     public async Task<IReadOnlyList<ReadOnlyMemory<float>>> EmbedAsync(IReadOnlyList<string> texts, CancellationToken ct = default)
     {
-        using var resp = await _http.PostAsJsonAsync(_embedPath,
-            new { model = _model, input = texts }, ct).ConfigureAwait(false);
-        resp.EnsureSuccessStatusCode();
-        using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false));
+        using var doc = await _http.PostJsonAsync(_embedPath, new { model = _model, input = texts }, ct).ConfigureAwait(false);
         var data = doc.RootElement.GetProperty("data");
         var result = new List<ReadOnlyMemory<float>>(texts.Count);
         foreach (var item in data.EnumerateArray())
@@ -182,8 +165,6 @@ public sealed class OpenAICompatibleEmbedder : IEmbeddingProvider, IDisposable
         }
         return result;
     }
-
-    public void Dispose() => _http.Dispose();
 }
 
 /// <summary>
@@ -210,4 +191,12 @@ public sealed class OfflineEmbedder : IEmbeddingProvider
         }
         return Task.FromResult<IReadOnlyList<ReadOnlyMemory<float>>>(result);
     }
+}
+
+/// <summary>Trivial offline chat completion for --dry-run (no network).</summary>
+public sealed class OfflineChatCompletion : IChatCompletion
+{
+    public string Id => "offline/passthrough";
+    public Task<string> CompleteAsync(string system, string user, CancellationToken ct = default)
+        => Task.FromResult("{\"facts\":[]}");
 }

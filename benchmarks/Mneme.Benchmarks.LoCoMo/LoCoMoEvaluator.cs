@@ -5,27 +5,49 @@ using Mneme.Search;
 
 namespace Mneme.Benchmarks.LoCoMo;
 
+/// <summary>How a conversation is loaded into Mneme before retrieval.</summary>
+public enum IngestMode
+{
+    /// <summary>Ingest each raw turn as an Evidence event (lexical baseline).</summary>
+    Turns,
+    /// <summary>Distill the conversation into Fact events first (Mneme's thesis).</summary>
+    Facts,
+    /// <summary>Ingest raw turns AND distilled facts (max recall).</summary>
+    Both,
+}
+
 /// <summary>
-/// Runs the LoCoMo evaluation against Mneme: ingest each conversation into a
-/// dedicated workstream, embed it, then for every question retrieve memory
-/// (hybrid semantic + lexical), answer with the configured model, and judge
-/// the answer. Scores are aggregated overall and per LoCoMo category.
+/// Runs the LoCoMo evaluation against Mneme: load each conversation into a
+/// dedicated workstream (raw turns and/or distilled facts), embed it, then for
+/// every question retrieve memory (hybrid semantic + lexical), answer with the
+/// configured model, and judge the answer. Aggregated overall + per category.
 /// </summary>
 public sealed class LoCoMoEvaluator
 {
+    private const int DistillChunk = 25; // turns per distillation call
+
     private readonly string _dataRoot;
     private readonly IEmbeddingProvider _embedder;
     private readonly IAnswerer _answerer;
     private readonly IJudge _judge;
+    private readonly ISessionDistiller? _distiller;
+    private readonly IngestMode _mode;
     private readonly int _topK;
 
-    public LoCoMoEvaluator(string dataRoot, IEmbeddingProvider embedder, IAnswerer answerer, IJudge judge, int topK)
+    public LoCoMoEvaluator(string dataRoot, IEmbeddingProvider embedder, IAnswerer answerer, IJudge judge,
+        ISessionDistiller? distiller, IngestMode mode, int topK)
     {
         _dataRoot = dataRoot;
         _embedder = embedder;
         _answerer = answerer;
         _judge = judge;
+        _distiller = distiller;
+        _mode = mode;
         _topK = topK;
+        if (mode is IngestMode.Facts or IngestMode.Both && distiller is null)
+        {
+            throw new InvalidOperationException($"Ingest mode '{mode}' requires a session distiller.");
+        }
         Directory.CreateDirectory(dataRoot);
     }
 
@@ -60,25 +82,33 @@ public sealed class LoCoMoEvaluator
                                     $"{sample.Turns.Count} turns, {sample.Questions.Count} questions");
 
             var (agent, query, token, vectors) = BuildWorkstream(sample.SampleId);
+            var ws = new WorkstreamId(sample.SampleId);
 
-            // Ingest every turn as Evidence stamped with its session time.
-            var n = 0;
-            foreach (var turn in sample.Turns)
+            // Load the conversation per the configured ingest mode.
+            if (_mode is IngestMode.Turns or IngestMode.Both)
             {
-                await agent.IngestAsync(new CaptureEvent(
-                    EventId: new EventId($"{sample.SampleId}-{n:D5}"),
-                    WorkstreamId: new WorkstreamId(sample.SampleId),
-                    Channel: EventChannel.Epistemic,
-                    ValidAt: turn.At,
-                    RecordedAt: turn.At,
-                    Payload: new EvidencePayload($"{turn.Speaker}: {turn.Text}", $"session-{turn.SessionNumber}"),
-                    Provenance: new CaptureProvenance(new CaptureSourceId("locomo"), new PrincipalId(turn.Speaker))),
-                    ct).ConfigureAwait(false);
-                n++;
+                var n = 0;
+                foreach (var turn in sample.Turns)
+                {
+                    await agent.IngestAsync(new CaptureEvent(
+                        EventId: new EventId($"{sample.SampleId}-t{n:D5}"),
+                        WorkstreamId: ws,
+                        Channel: EventChannel.Epistemic,
+                        ValidAt: turn.At,
+                        RecordedAt: turn.At,
+                        Payload: new EvidencePayload($"{turn.Speaker}: {turn.Text}", $"session-{turn.SessionNumber}"),
+                        Provenance: new CaptureProvenance(new CaptureSourceId("locomo"), new PrincipalId(turn.Speaker))),
+                        ct).ConfigureAwait(false);
+                    n++;
+                }
+            }
+            if (_mode is IngestMode.Facts or IngestMode.Both)
+            {
+                await DistillConversationAsync(agent, sample, token, ct).ConfigureAwait(false);
             }
 
-            // Embed for semantic retrieval.
-            await vectors.BackfillAsync(new WorkstreamId(sample.SampleId), ct).ConfigureAwait(false);
+            // Embed everything ingested (turns and/or facts) for semantic retrieval.
+            await vectors.BackfillAsync(ws, ct).ConfigureAwait(false);
 
             // Answer + judge each question (skipping any already graded).
             for (var qi = 0; qi < sample.Questions.Count; qi++)
@@ -106,7 +136,28 @@ public sealed class LoCoMoEvaluator
             }
         }
 
-        return LoCoMoReport.Aggregate(records, _embedder.Id, _answerer.Id, _judge.Id, _topK);
+        return LoCoMoReport.Aggregate(records, _embedder.Id, _answerer.Id, _judge.Id, _topK,
+            _mode.ToString().ToLowerInvariant(), _distiller?.Id ?? "(none)");
+    }
+
+    // Chunk the conversation and run Mneme's session distiller over each window,
+    // turning raw turns into atomic Fact events (with session-range citations).
+    private async Task DistillConversationAsync(IMemoryAgent agent, LoCoMoSample sample, CapabilityToken token, CancellationToken ct)
+    {
+        var session = new SessionId(sample.SampleId);
+        var entries = sample.Turns.Select((t, i) => new ContextEntry(
+            EntryId: $"e{i:D5}",
+            Timestamp: t.At,
+            Kind: ContextEntryKind.UserMessage,
+            Text: $"{t.Speaker}: {t.Text}",
+            SourceRef: $"session-{t.SessionNumber}")).ToArray();
+
+        for (var i = 0; i < entries.Length; i += DistillChunk)
+        {
+            ct.ThrowIfCancellationRequested();
+            var chunk = entries.Skip(i).Take(DistillChunk).ToArray();
+            await agent.DistillSessionAsync(session, chunk, token, ct).ConfigureAwait(false);
+        }
     }
 
     private (IMemoryAgent agent, IMemoryQueryAPI query, CapabilityToken token, VectorIndex vectors)
@@ -123,6 +174,7 @@ public sealed class LoCoMoEvaluator
             o.UserId = "locomo";
         });
         services.AddSingleton(_embedder);
+        if (_distiller is not null) services.AddSingleton(_distiller);
         var sp = services.BuildServiceProvider();
         return (sp.GetRequiredService<IMemoryAgent>(),
                 sp.GetRequiredService<IMemoryQueryAPI>(),
@@ -145,9 +197,12 @@ public sealed record LoCoMoReport(
     string EmbedderId,
     string AnswererId,
     string JudgeId,
-    int TopK)
+    int TopK,
+    string IngestMode,
+    string DistillerId)
 {
-    public static LoCoMoReport Aggregate(IReadOnlyList<QaRecord> rows, string embedderId, string answererId, string judgeId, int topK)
+    public static LoCoMoReport Aggregate(IReadOnlyList<QaRecord> rows, string embedderId, string answererId,
+        string judgeId, int topK, string ingestMode, string distillerId)
     {
         var total = rows.Count;
         var correct = rows.Count(r => r.Correct);
@@ -161,7 +216,7 @@ public sealed record LoCoMoReport(
             total, correct,
             total == 0 ? 0 : (double)correct / total,
             total == 0 ? 0 : rows.Average(r => r.ContextTokens),
-            byCat, embedderId, answererId, judgeId, topK);
+            byCat, embedderId, answererId, judgeId, topK, ingestMode, distillerId);
     }
 
     public string ToConsole()
@@ -169,6 +224,8 @@ public sealed record LoCoMoReport(
         var sb = new System.Text.StringBuilder();
         sb.AppendLine();
         sb.AppendLine("================ LoCoMo Results ================");
+        sb.AppendLine($"  ingest   : {IngestMode}");
+        sb.AppendLine($"  distiller: {DistillerId}");
         sb.AppendLine($"  embedder : {EmbedderId}");
         sb.AppendLine($"  answerer : {AnswererId}");
         sb.AppendLine($"  judge    : {JudgeId}");
@@ -198,6 +255,7 @@ public sealed record LoCoMoReport(
         sb.AppendLine("# Mneme — LoCoMo results");
         sb.AppendLine();
         sb.AppendLine($"- **Run:** {DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm} UTC");
+        sb.AppendLine($"- **Ingest mode:** {IngestMode}  (distiller: `{DistillerId}`)");
         sb.AppendLine($"- **Embedder:** `{EmbedderId}`");
         sb.AppendLine($"- **Answerer:** `{AnswererId}`");
         sb.AppendLine($"- **Judge:** `{JudgeId}`");
