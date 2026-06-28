@@ -48,19 +48,24 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
     private readonly TextSearchService _search;
     private readonly TimeProvider _clock;
     private readonly IDistiller? _distiller;
+    private readonly VectorIndex? _vectors;
     private readonly Mneme.Distillation.DistillationRequestBuilder _requestBuilder;
     private readonly Mneme.Distillation.DistillationCache _cache;
 
     /// <summary>Construct against the shared connection factory + text search service.</summary>
     public MemoryQueryApi(SqliteConnectionFactory connections, TextSearchService search)
-        : this(connections, search, TimeProvider.System, distiller: null) { }
+        : this(connections, search, TimeProvider.System, distiller: null, vectors: null) { }
 
     /// <summary>Construct with a custom clock (tests).</summary>
     public MemoryQueryApi(SqliteConnectionFactory connections, TextSearchService search, TimeProvider clock)
-        : this(connections, search, clock, distiller: null) { }
+        : this(connections, search, clock, distiller: null, vectors: null) { }
 
-    /// <summary>Construct with everything including an optional <see cref="IDistiller"/>.</summary>
+    /// <summary>Construct with an optional <see cref="IDistiller"/> (no vector index).</summary>
     public MemoryQueryApi(SqliteConnectionFactory connections, TextSearchService search, TimeProvider clock, IDistiller? distiller)
+        : this(connections, search, clock, distiller, vectors: null) { }
+
+    /// <summary>Construct with everything including an optional <see cref="IDistiller"/> and <see cref="VectorIndex"/>.</summary>
+    public MemoryQueryApi(SqliteConnectionFactory connections, TextSearchService search, TimeProvider clock, IDistiller? distiller, VectorIndex? vectors)
     {
         ArgumentNullException.ThrowIfNull(connections);
         ArgumentNullException.ThrowIfNull(search);
@@ -69,12 +74,13 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
         _search = search;
         _clock = clock;
         _distiller = distiller;
+        _vectors = vectors;
         _requestBuilder = new Mneme.Distillation.DistillationRequestBuilder(connections);
         _cache = new Mneme.Distillation.DistillationCache(connections);
     }
 
     /// <inheritdoc/>
-    public Task<QueryResult> QueryAsync(QueryRequest request, CapabilityToken token, CancellationToken ct = default)
+    public async Task<QueryResult> QueryAsync(QueryRequest request, CapabilityToken token, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         ct.ThrowIfCancellationRequested();
@@ -95,10 +101,20 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
         activity?.SetTag("mneme.query.has_free_text", !string.IsNullOrWhiteSpace(spec.FreeText));
         activity?.SetTag("mneme.query.as_of", spec.AsOf?.ToString("O"));
 
-        var (items, totalMatched, dispatcher, candidatesConsidered, gatedOut) =
-            string.IsNullOrWhiteSpace(spec.FreeText)
-                ? StructuredScan(spec, resolved, limit, request.Explain)
-                : FreeTextSearch(spec, resolved, limit, request.Explain);
+        (IReadOnlyList<QueryResultItem> Items, int TotalMatched, string Dispatcher, int Considered, int Gated) outcome;
+        if (string.IsNullOrWhiteSpace(spec.FreeText))
+        {
+            outcome = StructuredScan(spec, resolved, limit, request.Explain);
+        }
+        else if (_vectors is { IsEnabled: true } && !resolved.CrossWorkstream)
+        {
+            outcome = await HybridSearch(spec, resolved, limit, request.Explain, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            outcome = FreeTextSearch(spec, resolved, limit, request.Explain);
+        }
+        var (items, totalMatched, dispatcher, candidatesConsidered, gatedOut) = outcome;
 
         QueryExplain? explain = null;
         if (request.Explain)
@@ -110,7 +126,7 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
                 CandidatesGatedOut: gatedOut);
         }
 
-        return Task.FromResult(new QueryResult(items, totalMatched, explain));
+        return new QueryResult(items, totalMatched, explain);
     }
 
     /// <inheritdoc/>
@@ -394,6 +410,101 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
                 Details: details));
         }
         return (items, items.Count, "lexical-fts5", raw.Count, gated);
+    }
+
+    // Semantic + lexical hybrid retrieval. Runs when a host IEmbeddingProvider
+    // is registered (VectorIndex.IsEnabled). Fuses cosine semantic score with
+    // normalized BM25 and recency — the multi-signal approach LoCoMo-grade
+    // retrieval needs (paraphrases that share no keywords still match).
+    private async Task<(IReadOnlyList<QueryResultItem> Items, int TotalMatched, string Dispatcher, int Considered, int Gated)>
+        HybridSearch(QuerySpec spec, ResolvedCapability resolved, int limit, bool explain, CancellationToken ct)
+    {
+        const double wSemantic = 0.65;
+        const double wBm25 = 0.35;
+        var workstream = spec.Workstream!.Value;
+        var pool = Math.Min(200, Math.Max(limit * 8, 64));
+
+        var semantic = await _vectors!.SearchAsync(workstream, spec.FreeText!, pool, ct).ConfigureAwait(false);
+        var lexical = _search.Search(workstream.Value, spec.FreeText!, pool);
+
+        var semMap = semantic.ToDictionary(h => h.EventId.Value, h => h);
+        var lexMap = lexical.ToDictionary(h => h.EventId.Value, h => h);
+
+        var fused = new List<(string EventId, double Semantic, double Bm25, double Fused, double Recency, double Final)>();
+        foreach (var id in semMap.Keys.Union(lexMap.Keys))
+        {
+            var sem = semMap.TryGetValue(id, out var sh) ? sh.Semantic : 0.0;
+            var bm25 = lexMap.TryGetValue(id, out var lh) ? lh.NormalizedBm25 : 0.0;
+            var recency = semMap.TryGetValue(id, out var s2) ? s2.RecencyWeight
+                        : lexMap.TryGetValue(id, out var l2) ? l2.RecencyWeight
+                        : 1.0;
+            var fusedScore = (wSemantic * sem) + (wBm25 * bm25);
+            fused.Add((id, sem, bm25, fusedScore, recency, fusedScore * recency));
+        }
+        fused.Sort(static (a, b) => b.Final.CompareTo(a.Final));
+
+        using var c = _connections.Open();
+        var items = new List<QueryResultItem>(limit);
+        var gated = 0;
+        foreach (var cand in fused)
+        {
+            if (items.Count >= limit) break;
+            if (cand.Fused < SemanticThreshold) { gated++; continue; }
+
+            using var lookup = c.CreateCommand();
+            lookup.CommandText = """
+                SELECT e.category, e.valid_at, e.created_at, e.payload_json,
+                       e.event_channel, e.invalid_at, r.revoked_at
+                FROM memory_events e
+                LEFT JOIN memory_revocations r ON r.event_id = e.event_id
+                WHERE e.event_id = $id AND e.workstream_id = $ws;
+                """;
+            lookup.Parameters.AddWithValue("$id", cand.EventId);
+            lookup.Parameters.AddWithValue("$ws", workstream.Value);
+            using var rd = lookup.ExecuteReader();
+            if (!rd.Read()) { gated++; continue; }
+            var category = (EpistemicCategory)rd.GetInt32(0);
+            if (!resolved.EffectiveCategories.Contains(category)) { gated++; continue; }
+            var channel = (EventChannel)rd.GetInt32(4);
+            if (channel != spec.Channel) { gated++; continue; }
+            if (!rd.IsDBNull(6)) { gated++; continue; } // revoked
+            var validAt = DateTimeOffset.Parse(rd.GetString(1), System.Globalization.CultureInfo.InvariantCulture);
+            var recordedAt = DateTimeOffset.Parse(rd.GetString(2), System.Globalization.CultureInfo.InvariantCulture);
+            if (spec.From is { } fromBound && validAt < fromBound) { gated++; continue; }
+            if (spec.To   is { } toBound   && validAt > toBound)   { gated++; continue; }
+            if (spec.AsOf is { } asOf)
+            {
+                if (recordedAt > asOf) { gated++; continue; }
+                if (!rd.IsDBNull(5))
+                {
+                    var inv = DateTimeOffset.Parse(rd.GetString(5), System.Globalization.CultureInfo.InvariantCulture);
+                    if (inv <= asOf) { gated++; continue; }
+                }
+            }
+            var payload = Storage.EventSerialization.DeserializePayload(rd.GetString(3));
+            const double curationMult = 1.0;
+            var details = explain
+                ? new ScoreDetails(
+                    Semantic: cand.Semantic,
+                    Bm25: cand.Bm25,
+                    EntityBoost: 0.0,
+                    CurationMultiplier: curationMult,
+                    Fused: cand.Fused,
+                    Final: cand.Final * curationMult,
+                    PassedSemanticThreshold: true,
+                    GateReason: null)
+                : null;
+            items.Add(new QueryResultItem(
+                EventId: new EventId(cand.EventId),
+                Category: category,
+                ValidAt: validAt,
+                RecordedAt: recordedAt,
+                Summary: SummariseShort(payload),
+                Score: cand.Final * curationMult,
+                Annotations: Array.Empty<string>(),
+                Details: details));
+        }
+        return (items, items.Count, "hybrid-semantic-bm25", fused.Count, gated);
     }
 
     private EventId? GetLastEventId(WorkstreamId workstream)

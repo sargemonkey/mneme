@@ -27,7 +27,7 @@ namespace Mneme.Storage;
 public static class SqliteSchema
 {
     /// <summary>Current schema version. Bumped when the DDL changes incompatibly.</summary>
-    public const int Version = 8;
+    public const int Version = 9;
 
     /// <summary>
     /// Idempotently create all Phase 1 tables, indexes, and the
@@ -454,5 +454,24 @@ public static class SqliteSchema
             events_count    INTEGER NOT NULL,
             PRIMARY KEY (session_id, from_entry_id, to_entry_id)
         ) WITHOUT ROWID;
+
+        -- v9: per-event embedding vectors for semantic retrieval. Stored as
+        -- raw float32 little-endian BLOBs. Brute-force cosine KNN over the
+        -- workstream's vectors serves semantic search at v1 scale (a few
+        -- thousand events) in sub-millisecond time — sqlite-vec is only
+        -- needed once corpora reach the millions (Phase 11). provider_id +
+        -- dim are stored so a model/dimensionality change is detectable and
+        -- triggers a re-embed rather than corrupting cosine math.
+        CREATE TABLE IF NOT EXISTS event_embeddings (
+            event_id        TEXT NOT NULL PRIMARY KEY,
+            workstream_id   TEXT NOT NULL,
+            provider_id     TEXT NOT NULL,
+            dim             INTEGER NOT NULL,
+            vector          BLOB NOT NULL,
+            created_at      TEXT NOT NULL,
+            FOREIGN KEY (event_id) REFERENCES memory_events(event_id)
+        ) WITHOUT ROWID;
+        CREATE INDEX IF NOT EXISTS idx_event_embeddings_ws
+            ON event_embeddings(workstream_id, provider_id);
         """;
 }

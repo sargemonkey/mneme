@@ -93,6 +93,11 @@ public static class MnemeServiceCollectionExtensions
             }));
         services.TryAddSingleton<TextSearchService>(sp => new TextSearchService(
             sp.GetRequiredService<SqliteConnectionFactory>()));
+        services.TryAddSingleton<VectorIndex>(sp => new VectorIndex(
+            sp.GetRequiredService<SqliteConnectionFactory>(),
+            sp.GetService<IEmbeddingProvider>(),
+            sp.GetRequiredService<TimeProvider>(),
+            TimeSpan.FromDays(30)));
         services.AddSingleton<IIngestObserver>(sp => new ProjectorIngestObserver(
             sp.GetRequiredService<ProjectorPipeline>()));
         services.AddSingleton<IIngestObserver>(sp => new TextSearchIngestObserver(
@@ -112,7 +117,8 @@ public static class MnemeServiceCollectionExtensions
             sp.GetRequiredService<SqliteConnectionFactory>(),
             sp.GetRequiredService<TextSearchService>(),
             sp.GetRequiredService<TimeProvider>(),
-            sp.GetService<IDistiller>()));
+            sp.GetService<IDistiller>(),
+            sp.GetRequiredService<VectorIndex>()));
         services.TryAddSingleton<IMemoryCurator>(sp => new SqliteMemoryCurator(
             sp.GetRequiredService<SqliteConnectionFactory>(),
             sp.GetRequiredService<TimeProvider>()));
