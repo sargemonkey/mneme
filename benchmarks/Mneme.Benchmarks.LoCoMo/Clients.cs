@@ -96,10 +96,13 @@ public sealed class OpenAICompatibleChat : IAnswerer, IJudge, IDisposable
     {
         var ctx = context.Count == 0 ? "(no relevant memory retrieved)"
             : string.Join("\n", context.Select((c, i) => $"[{i + 1}] {c}"));
-        var system = "You answer questions using ONLY the provided memory snippets. " +
-                     "Be concise — a few words or a short phrase. If the snippets don't contain " +
-                     "the answer, say you don't know.";
-        var user = $"Memory:\n{ctx}\n\nQuestion: {question}\nAnswer:";
+        var system = "You answer questions about a long personal conversation using the retrieved " +
+                     "memory snippets as evidence. Reason over the snippets to infer the answer even " +
+                     "when it is not stated verbatim (e.g. preferences, likelihoods, or facts implied " +
+                     "across multiple snippets). For list questions, include every item the snippets " +
+                     "support. Answer concisely — a word, phrase, date, or short list. Only answer " +
+                     "\"I don't know\" if the snippets give no basis at all.";
+        var user = $"Memory snippets:\n{ctx}\n\nQuestion: {question}\nShort answer:";
         return await ChatAsync(system, user, ct).ConfigureAwait(false);
     }
 

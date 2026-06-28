@@ -69,6 +69,48 @@ Optional: `MNEME_EMBED_BASE_URL` / `MNEME_EMBED_API_KEY` if embeddings live on
 a different endpoint than chat. `--k <int>` sets retrieval depth (default 10);
 `--limit <n>` caps the number of conversations.
 
+## Sample result (illustrative)
+
+A live run against **GitHub Models** (`openai/gpt-4o-mini` for answer + judge,
+`openai/text-embedding-3-small` for retrieval) over a **balanced 50-question
+subset** of one LoCoMo conversation (`conv-26`, 419 turns; 10 questions sampled
+from each of the 5 categories), `--k 20`:
+
+| Category | Accuracy |
+|---|---:|
+| single-hop | 70% |
+| temporal | 60% |
+| open-domain | 40% |
+| adversarial | 20% |
+| multi-hop | 10% |
+| **Overall** | **40%** |
+
+Mean context: ~646 tokens/query.
+
+**Read this honestly:**
+- It is a **50-question subset of one conversation**, not the full 1,540/1,986-question
+  LoCoMo set, and uses `gpt-4o-mini` — so it is **not** directly comparable to
+  Mem0's published 92.5% (full set, their own pipeline + larger models).
+- The number is a **baseline for Mneme's current retrieval** (hybrid FTS5 +
+  brute-force vectors + recency), with **no reranker, no query expansion, and
+  no iterative multi-hop retrieval**. Single-hop/temporal recall is decent;
+  multi-hop *aggregation* and buried single-fact (adversarial) recall are the
+  clear weak spots.
+- **Biggest known lever — not yet wired:** this harness ingests **raw
+  conversation turns** and retrieves over them. It does **not** run Mneme's
+  distillation pipeline (`ISessionDistiller` → Facts/Decisions) first, which is
+  Mneme's actual thesis (proactive compression). Distilling the conversation
+  into epistemic facts before retrieval is expected to be the single largest
+  improvement and is the natural next experiment.
+
+Reproduce with your own subset:
+
+```pwsh
+# build a balanced subset from the full dataset (see datasets/ in your checkout)
+$env:MNEME_LLM_PROVIDER="github-models"; $env:GITHUB_TOKEN=(gh auth token)
+dotnet run -c Release --project benchmarks/Mneme.Benchmarks.LoCoMo -- --dataset datasets/locomo-subset.json --k 20
+```
+
 ## Resuming + outputs (rate-limit friendly)
 
 Every graded question is appended to `results.jsonl` immediately, so a run that
