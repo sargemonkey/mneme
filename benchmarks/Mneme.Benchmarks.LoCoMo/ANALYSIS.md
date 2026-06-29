@@ -10,6 +10,26 @@ the gaps are versus published numbers from other memory layers (Mem0, Zep).
 
 ## Runs
 
+### Improvement progression (full conv-26, 199 questions)
+
+Each lever added on top of the previous, gpt-4o-mini + text-embedding-3-small:
+
+| Config | Overall | single | multi | temporal | open | adversarial | ctx tok | abstain* |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| facts, k=20 | 36.2% | 60.0 | 21.9 | 32.4 | 46.2 | 10.6 | 330 | 52% |
+| facts + rerank | 39.2% | 64.3 | 25.0 | 35.1 | 46.2 | 12.8 | **99** | — |
+| both + rerank + iterative | **46.2%** | 71.4 | 25.0 | 43.2 | 38.5 | **27.7** | 308 | **41%** |
+
+*abstain = share of *misses* that were "I don't know" (a fact-not-retrieved /
+recall signal). It fell from 52% → 41%; adversarial abstentions 33 → 22.
+
+**+10pp overall** from the recall work (both-mode keeps raw turns so buried
+specifics survive distillation; iterative multi-hop retrieval decomposes the
+question and unions the hits). The category that moved most is **adversarial,
+10.6% → 27.7% (>2.5×)** — exactly the recall-bound category the miss-analysis
+predicted. Reranking earlier gave the token-efficiency win (330 → 99); recall
+gave the accuracy win.
+
 ### Balanced 50-question subset (10 per category, conv-26), k=20
 
 | Ingest mode | Overall | single-hop | multi-hop | temporal | open-domain | adversarial | Mean ctx tokens |
@@ -142,11 +162,14 @@ weakest, and they set the overall:
 
 ## Prioritized next experiments
 
-1. ✅ **Cross-encoder rerank** over the hybrid top-k — shipped (`IReranker`);
-   +3pp overall and 3× fewer context tokens. Precision lever; helped every cat.
-2. **Iterative multi-hop retrieval** (decompose → retrieve → retrieve again) —
-   the top remaining lever; rerank can't fix recall gaps it never sees.
-3. **Higher k into rerank** (recall ↑, rerank trims tokens back down).
-4. **F1 / partial-credit judge** option to match LoCoMo's official scoring.
-5. **Higher-granularity distillation** so adversarial specifics survive.
-6. The full 1,540-question run (resume-driven) for a headline number.
+1. ✅ **Cross-encoder rerank** — shipped (`IReranker`); token efficiency win.
+2. ✅ **Iterative multi-hop retrieval** + **both-mode** — shipped; +10pp, halved
+   the adversarial recall gap (abstentions 52% → 41%).
+3. **F1 / partial-credit judge** option to match LoCoMo's official scoring —
+   the remaining misses are now mostly *attempted-but-wrong* (multi-hop lists,
+   adversarial near-misses) that a binary judge penalizes harshly.
+4. **Temporal reasoning** — surface event dates into snippets + date math.
+5. **Concurrency in the harness** — GitHub Models allows 20k req/min; the run
+   is latency-bound, not rate-bound, so parallelizing questions would make the
+   full 1,540-question run finish in minutes.
+6. The full 1,540-question run for a headline number with proper denominators.
