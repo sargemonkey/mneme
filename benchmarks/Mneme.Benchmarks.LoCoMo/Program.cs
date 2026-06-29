@@ -69,8 +69,11 @@ internal static class Program
         var (embedder, answerer, judge, distiller, mode) = BuildClients(args);
         var reranker = args.Contains("--rerank") && answerer is IChatCompletion chat
             ? new LlmReranker(chat) : null;
+        var planner = args.Contains("--iterative") && answerer is IChatCompletion pchat
+            ? new QueryPlanner(pchat) : null;
         Console.Error.WriteLine($"Mode: {mode}   ingest: {ingestMode.ToString().ToLowerInvariant()}" +
-                                (reranker is not null ? "   rerank: on" : ""));
+                                (reranker is not null ? "   rerank: on" : "") +
+                                (planner is not null ? "   iterative: on" : ""));
 
         var dataRoot = Path.Combine(AppContext.BaseDirectory, "locomo-data");
         var outDir = GetArg(args, "--out") ?? Path.Combine(AppContext.BaseDirectory, "locomo-results");
@@ -81,7 +84,7 @@ internal static class Program
             Console.Error.WriteLine("--fresh: cleared any prior results, starting over.");
         }
 
-        var evaluator = new LoCoMoEvaluator(dataRoot, embedder, answerer, judge, distiller, reranker, ingestMode, topK);
+        var evaluator = new LoCoMoEvaluator(dataRoot, embedder, answerer, judge, distiller, reranker, planner, ingestMode, topK);
 
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
@@ -119,7 +122,7 @@ internal static class Program
         BuildClients(string[] args)
     {
         var provider = (Environment.GetEnvironmentVariable("MNEME_LLM_PROVIDER") ?? "").Trim().ToLowerInvariant();
-        var rpm = double.TryParse(GetArg(args, "--rpm") ?? Environment.GetEnvironmentVariable("MNEME_LLM_RPM"), out var r) ? r : 10.0;
+        var rpm = double.TryParse(GetArg(args, "--rpm") ?? Environment.GetEnvironmentVariable("MNEME_LLM_RPM"), out var r) ? r : 120.0;
         var maxRetries = int.TryParse(Environment.GetEnvironmentVariable("MNEME_LLM_MAX_RETRIES"), out var mr) ? mr : 8;
 
         // --- GitHub Models (the "use Copilot / GitHub models" path) ---------

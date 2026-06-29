@@ -32,11 +32,12 @@ public sealed class LoCoMoEvaluator
     private readonly IJudge _judge;
     private readonly ISessionDistiller? _distiller;
     private readonly IReranker? _reranker;
+    private readonly QueryPlanner? _planner;
     private readonly IngestMode _mode;
     private readonly int _topK;
 
     public LoCoMoEvaluator(string dataRoot, IEmbeddingProvider embedder, IAnswerer answerer, IJudge judge,
-        ISessionDistiller? distiller, IReranker? reranker, IngestMode mode, int topK)
+        ISessionDistiller? distiller, IReranker? reranker, QueryPlanner? planner, IngestMode mode, int topK)
     {
         _dataRoot = dataRoot;
         _embedder = embedder;
@@ -44,6 +45,7 @@ public sealed class LoCoMoEvaluator
         _judge = judge;
         _distiller = distiller;
         _reranker = reranker;
+        _planner = planner;
         _mode = mode;
         _topK = topK;
         if (mode is IngestMode.Facts or IngestMode.Both && distiller is null)
@@ -122,11 +124,8 @@ public sealed class LoCoMoEvaluator
                     continue;
                 }
                 var qa = sample.Questions[qi];
-                var result = await query.QueryAsync(new QueryRequest(
-                    new QuerySpec(new WorkstreamId(sample.SampleId), FreeText: qa.Question, Limit: _topK)),
-                    token, ct).ConfigureAwait(false);
-                var context = result.Items.Select(i => i.Summary).ToArray();
-                var contextTokens = context.Sum(c => ApproxTokens(c));
+                var context = await RetrieveContextAsync(query, token, new WorkstreamId(sample.SampleId), qa.Question, ct).ConfigureAwait(false);
+                var contextTokens = context.Sum(ApproxTokens);
 
                 var predicted = await _answerer.AnswerAsync(qa.Question, context, ct).ConfigureAwait(false);
                 var correct = await _judge.IsCorrectAsync(qa.Question, qa.Answer, predicted, ct).ConfigureAwait(false);
@@ -140,6 +139,26 @@ public sealed class LoCoMoEvaluator
 
         return LoCoMoReport.Aggregate(records, _embedder.Id, _answerer.Id, _judge.Id, _topK,
             _mode.ToString().ToLowerInvariant(), _distiller?.Id ?? "(none)", _reranker?.Id ?? "(none)");
+    }
+
+    // Single-shot or iterative multi-hop retrieval. With a planner, decompose
+    // into sub-queries, retrieve each, union by event id, and keep the best
+    // topK summaries — surfaces facts a single query misses (the recall lever).
+    private async Task<IReadOnlyList<string>> RetrieveContextAsync(
+        IMemoryQueryAPI query, CapabilityToken token, WorkstreamId ws, string question, CancellationToken ct)
+    {
+        var queries = _planner is null ? new[] { question } : (await _planner.PlanAsync(question, ct).ConfigureAwait(false)).ToArray();
+        var best = new Dictionary<string, (double Score, string Summary)>();
+        foreach (var q in queries)
+        {
+            var res = await query.QueryAsync(new QueryRequest(new QuerySpec(ws, FreeText: q, Limit: _topK)), token, ct).ConfigureAwait(false);
+            foreach (var item in res.Items)
+            {
+                if (!best.TryGetValue(item.EventId.Value, out var cur) || item.Score > cur.Score)
+                    best[item.EventId.Value] = (item.Score, item.Summary);
+            }
+        }
+        return best.Values.OrderByDescending(v => v.Score).Take(_topK).Select(v => v.Summary).ToArray();
     }
 
     // Chunk the conversation and run Mneme's session distiller over each window,
