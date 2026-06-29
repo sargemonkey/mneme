@@ -61,6 +61,30 @@ public sealed class OfflineJudge : IJudge
          .ToHashSet(StringComparer.Ordinal);
 }
 
+/// <summary>
+/// Hybrid judge: counts a prediction correct if the inner (LLM) judge says yes
+/// OR token-F1 against the gold clears a threshold. This matches LoCoMo's more
+/// lenient official scoring, which gives partial credit for list/near-miss
+/// answers a strict binary LLM judge would fail.
+/// </summary>
+public sealed class HybridJudge : IJudge
+{
+    private readonly IJudge _inner;
+    private readonly OfflineJudge _f1;
+    public HybridJudge(IJudge inner, double f1Threshold = 0.5)
+    {
+        _inner = inner;
+        _f1 = new OfflineJudge(f1Threshold);
+    }
+    public string Id => $"hybrid({_inner.Id} OR {_f1.Id})";
+
+    public async Task<bool> IsCorrectAsync(string question, string gold, string predicted, CancellationToken ct = default)
+    {
+        if (await _f1.IsCorrectAsync(question, gold, predicted, ct).ConfigureAwait(false)) return true;
+        return await _inner.IsCorrectAsync(question, gold, predicted, ct).ConfigureAwait(false);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // OpenAI-compatible HTTP implementations — turnkey for a REAL run. They speak
 // the chat/completions + embeddings REST shape (path configurable), so they

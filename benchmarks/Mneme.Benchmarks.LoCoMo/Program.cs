@@ -67,11 +67,23 @@ internal static class Program
         };
 
         var (embedder, answerer, judge, distiller, mode) = BuildClients(args);
+
+        // Optional judge override: f1 = token-F1 only (no LLM); hybrid = F1 OR LLM.
+        var judgeArg = (GetArg(args, "--judge") ?? "llm").Trim().ToLowerInvariant();
+        judge = judgeArg switch
+        {
+            "f1" => new OfflineJudge(),
+            "hybrid" => new HybridJudge(judge),
+            _ => judge,
+        };
+
         var reranker = args.Contains("--rerank") && answerer is IChatCompletion chat
             ? new LlmReranker(chat) : null;
         var planner = args.Contains("--iterative") && answerer is IChatCompletion pchat
             ? new QueryPlanner(pchat) : null;
+        var concurrency = int.TryParse(GetArg(args, "--concurrency"), out var cc) ? cc : 1;
         Console.Error.WriteLine($"Mode: {mode}   ingest: {ingestMode.ToString().ToLowerInvariant()}" +
+                                $"   judge: {judgeArg}   concurrency: {concurrency}" +
                                 (reranker is not null ? "   rerank: on" : "") +
                                 (planner is not null ? "   iterative: on" : ""));
 
@@ -84,7 +96,7 @@ internal static class Program
             Console.Error.WriteLine("--fresh: cleared any prior results, starting over.");
         }
 
-        var evaluator = new LoCoMoEvaluator(dataRoot, embedder, answerer, judge, distiller, reranker, planner, ingestMode, topK);
+        var evaluator = new LoCoMoEvaluator(dataRoot, embedder, answerer, judge, distiller, reranker, planner, ingestMode, topK, concurrency);
 
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };

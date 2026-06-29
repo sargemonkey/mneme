@@ -35,9 +35,10 @@ public sealed class LoCoMoEvaluator
     private readonly QueryPlanner? _planner;
     private readonly IngestMode _mode;
     private readonly int _topK;
+    private readonly int _concurrency;
 
     public LoCoMoEvaluator(string dataRoot, IEmbeddingProvider embedder, IAnswerer answerer, IJudge judge,
-        ISessionDistiller? distiller, IReranker? reranker, QueryPlanner? planner, IngestMode mode, int topK)
+        ISessionDistiller? distiller, IReranker? reranker, QueryPlanner? planner, IngestMode mode, int topK, int concurrency = 1)
     {
         _dataRoot = dataRoot;
         _embedder = embedder;
@@ -48,6 +49,7 @@ public sealed class LoCoMoEvaluator
         _planner = planner;
         _mode = mode;
         _topK = topK;
+        _concurrency = Math.Max(1, concurrency);
         if (mode is IngestMode.Facts or IngestMode.Both && distiller is null)
         {
             throw new InvalidOperationException($"Ingest mode '{mode}' requires a session distiller.");
@@ -114,27 +116,44 @@ public sealed class LoCoMoEvaluator
             // Embed everything ingested (turns and/or facts) for semantic retrieval.
             await vectors.BackfillAsync(ws, ct).ConfigureAwait(false);
 
-            // Answer + judge each question (skipping any already graded).
-            for (var qi = 0; qi < sample.Questions.Count; qi++)
+            // Answer + judge each pending question, up to _concurrency in flight.
+            // Ingest/embed above is sequential; only the LLM-heavy read+answer+
+            // judge phase is parallelized (GitHub Models allows 20k req/min, so
+            // the run is latency-bound — concurrency is the real speedup).
+            var pending = Enumerable.Range(0, sample.Questions.Count)
+                .Where(qi => !existing.ContainsKey((sample.SampleId, qi)))
+                .ToArray();
+            foreach (var qi in Enumerable.Range(0, sample.Questions.Count).Where(existsCached))
             {
-                ct.ThrowIfCancellationRequested();
-                if (existing.TryGetValue((sample.SampleId, qi), out var cached))
-                {
-                    records.Add(cached);
-                    continue;
-                }
-                var qa = sample.Questions[qi];
-                var context = await RetrieveContextAsync(query, token, new WorkstreamId(sample.SampleId), qa.Question, ct).ConfigureAwait(false);
-                var contextTokens = context.Sum(ApproxTokens);
-
-                var predicted = await _answerer.AnswerAsync(qa.Question, context, ct).ConfigureAwait(false);
-                var correct = await _judge.IsCorrectAsync(qa.Question, qa.Answer, predicted, ct).ConfigureAwait(false);
-
-                var record = new QaRecord(sample.SampleId, qi, qa.CategoryId, qa.CategoryLabel,
-                    qa.Question, qa.Answer, predicted, correct, contextTokens);
-                records.Add(record);
-                store?.Append(record); // durable after every graded question → resumable
+                records.Add(existing[(sample.SampleId, qi)]);
             }
+            bool existsCached(int qi) => existing.ContainsKey((sample.SampleId, qi));
+
+            var gate = new SemaphoreSlim(_concurrency);
+            var sink = new object();
+            var done = 0;
+            var tasks = pending.Select(async qi =>
+            {
+                await gate.WaitAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    var qa = sample.Questions[qi];
+                    var context = await RetrieveContextAsync(query, token, ws, qa.Question, ct).ConfigureAwait(false);
+                    var contextTokens = context.Sum(ApproxTokens);
+                    var predicted = await _answerer.AnswerAsync(qa.Question, context, ct).ConfigureAwait(false);
+                    var correct = await _judge.IsCorrectAsync(qa.Question, qa.Answer, predicted, ct).ConfigureAwait(false);
+                    var record = new QaRecord(sample.SampleId, qi, qa.CategoryId, qa.CategoryLabel,
+                        qa.Question, qa.Answer, predicted, correct, contextTokens);
+                    lock (sink)
+                    {
+                        records.Add(record);
+                        store?.Append(record); // durable after every graded question → resumable
+                        if (++done % 25 == 0) Console.Error.WriteLine($"    {done}/{pending.Length} graded");
+                    }
+                }
+                finally { gate.Release(); }
+            });
+            await Task.WhenAll(tasks).ConfigureAwait(false);
         }
 
         return LoCoMoReport.Aggregate(records, _embedder.Id, _answerer.Id, _judge.Id, _topK,
