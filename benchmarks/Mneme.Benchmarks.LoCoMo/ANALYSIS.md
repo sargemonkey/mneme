@@ -10,7 +10,32 @@ the gaps are versus published numbers from other memory layers (Mem0, Zep).
 
 ## Runs
 
-### Improvement progression (full conv-26, 199 questions)
+### Headline: stratified sample across ALL 10 conversations (245 Q)
+
+Best config — both-mode + rerank + iterative multi-hop retrieval + hybrid
+judge, gpt-4o-mini + text-embedding-3-small, k=20. 245 questions sampled
+evenly across all 10 LoCoMo conversations and all 5 categories (~50 each):
+
+| Category | n | Accuracy |
+|---|---:|---:|
+| single-hop | 50 | 76.0% |
+| multi-hop | 50 | **52.0%** |
+| open-domain | 45 | 42.2% |
+| adversarial | 50 | 18.0% |
+| temporal | 50 | 20.0% |
+| **Overall** | **245** | **41.6%** |
+
+Mean context: 334 tokens/query (vs Mem0 ~6,956, Zep ~1,600).
+
+This is the most representative Mneme number to date (all 10 conversations, not
+one). Two things stand out vs the early single-conversation runs:
+- **multi-hop 22% → 52%** — iterative retrieval (decompose → retrieve each hop →
+  union) is doing exactly what the miss-analysis predicted. It's now a *strength*.
+- **temporal collapsed to 20%** — across the full corpus, date-difference
+  reasoning is the new weakest link (the single conv-26 sample happened to have
+  easier temporal questions at 43%). Adversarial (18%) remains hard.
+
+### Improvement progression (single conversation, conv-26, 199 Q)
 
 Each lever added on top of the previous, gpt-4o-mini + text-embedding-3-small:
 
@@ -162,14 +187,17 @@ weakest, and they set the overall:
 
 ## Prioritized next experiments
 
-1. ✅ **Cross-encoder rerank** — shipped (`IReranker`); token efficiency win.
-2. ✅ **Iterative multi-hop retrieval** + **both-mode** — shipped; +10pp, halved
-   the adversarial recall gap (abstentions 52% → 41%).
-3. **F1 / partial-credit judge** option to match LoCoMo's official scoring —
-   the remaining misses are now mostly *attempted-but-wrong* (multi-hop lists,
-   adversarial near-misses) that a binary judge penalizes harshly.
-4. **Temporal reasoning** — surface event dates into snippets + date math.
-5. **Concurrency in the harness** — GitHub Models allows 20k req/min; the run
-   is latency-bound, not rate-bound, so parallelizing questions would make the
-   full 1,540-question run finish in minutes.
-6. The full 1,540-question run for a headline number with proper denominators.
+1. ✅ **Cross-encoder rerank** — shipped (`IReranker`); token-efficiency win.
+2. ✅ **Iterative multi-hop retrieval** + **both-mode** — shipped; multi-hop
+   22% → 52% across the full corpus (now a strength).
+3. ✅ **F1/hybrid judge** + **question concurrency** — shipped; +2.5pp from
+   judge parity; concurrency made the 10-conversation run tractable.
+4. **Temporal reasoning** — now the weakest category (20% across the corpus).
+   Surface event dates into snippets, add date-difference computation in the
+   answer step, and a temporal-aware retrieval path. **The top remaining lever.**
+5. **Adversarial recall** (18%) — buried single-fact lookup; needs higher k +
+   stronger rerank, or a verification pass.
+6. **Throughput** — GitHub Models concurrency-limits hard (heavy 429s above ~3
+   in-flight, regardless of the 20k/min request budget). For the full 1,986-Q
+   run, either accept ~2h at concurrency 2–3 (resume-driven) or use a provider
+   with higher concurrency.
