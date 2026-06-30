@@ -82,10 +82,12 @@ internal static class Program
         var planner = args.Contains("--iterative") && answerer is IChatCompletion pchat
             ? new QueryPlanner(pchat) : null;
         var concurrency = int.TryParse(GetArg(args, "--concurrency"), out var cc) ? cc : 1;
+        var recallRetry = args.Contains("--recall-retry");
         Console.Error.WriteLine($"Mode: {mode}   ingest: {ingestMode.ToString().ToLowerInvariant()}" +
                                 $"   judge: {judgeArg}   concurrency: {concurrency}" +
                                 (reranker is not null ? "   rerank: on" : "") +
-                                (planner is not null ? "   iterative: on" : ""));
+                                (planner is not null ? "   iterative: on" : "") +
+                                (recallRetry ? "   recall-retry: on" : ""));
 
         var dataRoot = Path.Combine(AppContext.BaseDirectory, "locomo-data");
         var outDir = GetArg(args, "--out") ?? Path.Combine(AppContext.BaseDirectory, "locomo-results");
@@ -96,7 +98,7 @@ internal static class Program
             Console.Error.WriteLine("--fresh: cleared any prior results, starting over.");
         }
 
-        var evaluator = new LoCoMoEvaluator(dataRoot, embedder, answerer, judge, distiller, reranker, planner, ingestMode, topK, concurrency);
+        var evaluator = new LoCoMoEvaluator(dataRoot, embedder, answerer, judge, distiller, reranker, planner, ingestMode, topK, concurrency, recallRetry);
 
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };

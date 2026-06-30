@@ -120,11 +120,13 @@ public sealed class OpenAICompatibleChat : IAnswerer, IJudge, IChatCompletion
         var ctx = context.Count == 0 ? "(no relevant memory retrieved)"
             : string.Join("\n", context.Select((c, i) => $"[{i + 1}] {c}"));
         var system = "You answer questions about a long personal conversation using the retrieved " +
-                     "memory snippets as evidence. Reason over the snippets to infer the answer even " +
-                     "when it is not stated verbatim (e.g. preferences, likelihoods, or facts implied " +
-                     "across multiple snippets). For list questions, include every item the snippets " +
-                     "support. Answer concisely — a word, phrase, date, or short list. Only answer " +
-                     "\"I don't know\" if the snippets give no basis at all.";
+                     "memory snippets as evidence. Each snippet is prefixed with [YYYY-MM-DD], the " +
+                     "date it was said — use these for any 'when', 'how long', or date-difference " +
+                     "question (compute the interval yourself). Reason over the snippets to infer the " +
+                     "answer even when it is not stated verbatim (preferences, likelihoods, or facts " +
+                     "implied across multiple snippets). For list questions, include every item the " +
+                     "snippets support. Answer concisely — a word, phrase, date, or short list. Only " +
+                     "answer \"I don't know\" if the snippets give no basis at all.";
         var user = $"Memory snippets:\n{ctx}\n\nQuestion: {question}\nShort answer:";
         return await CompleteAsync(system, user, ct).ConfigureAwait(false);
     }

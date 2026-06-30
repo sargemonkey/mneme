@@ -36,9 +36,11 @@ public sealed class LoCoMoEvaluator
     private readonly IngestMode _mode;
     private readonly int _topK;
     private readonly int _concurrency;
+    private readonly bool _recallRetry;
 
     public LoCoMoEvaluator(string dataRoot, IEmbeddingProvider embedder, IAnswerer answerer, IJudge judge,
-        ISessionDistiller? distiller, IReranker? reranker, QueryPlanner? planner, IngestMode mode, int topK, int concurrency = 1)
+        ISessionDistiller? distiller, IReranker? reranker, QueryPlanner? planner, IngestMode mode, int topK,
+        int concurrency = 1, bool recallRetry = false)
     {
         _dataRoot = dataRoot;
         _embedder = embedder;
@@ -50,6 +52,7 @@ public sealed class LoCoMoEvaluator
         _mode = mode;
         _topK = topK;
         _concurrency = Math.Max(1, concurrency);
+        _recallRetry = recallRetry;
         if (mode is IngestMode.Facts or IngestMode.Both && distiller is null)
         {
             throw new InvalidOperationException($"Ingest mode '{mode}' requires a session distiller.");
@@ -141,9 +144,20 @@ public sealed class LoCoMoEvaluator
                     QaRecord record;
                     try
                     {
-                        var context = await RetrieveContextAsync(query, token, ws, qa.Question, ct).ConfigureAwait(false);
-                        var contextTokens = context.Sum(ApproxTokens);
+                        var context = await RetrieveContextAsync(query, token, ws, qa.Question, _topK, ct).ConfigureAwait(false);
                         var predicted = await _answerer.AnswerAsync(qa.Question, context, ct).ConfigureAwait(false);
+
+                        // Recall-retry: a buried single fact (adversarial) often
+                        // isn't in the first top-k. If the model abstained, cast a
+                        // wider net (3× depth) and answer once more before giving up.
+                        if (_recallRetry && IsAbstention(predicted))
+                        {
+                            var wider = await RetrieveContextAsync(query, token, ws, qa.Question, _topK * 3, ct).ConfigureAwait(false);
+                            var retry = await _answerer.AnswerAsync(qa.Question, wider, ct).ConfigureAwait(false);
+                            if (!IsAbstention(retry)) { predicted = retry; context = wider; }
+                        }
+
+                        var contextTokens = context.Sum(ApproxTokens);
                         var correct = await _judge.IsCorrectAsync(qa.Question, qa.Answer, predicted, ct).ConfigureAwait(false);
                         record = new QaRecord(sample.SampleId, qi, qa.CategoryId, qa.CategoryLabel,
                             qa.Question, qa.Answer, predicted, correct, contextTokens);
@@ -176,22 +190,33 @@ public sealed class LoCoMoEvaluator
     // Single-shot or iterative multi-hop retrieval. With a planner, decompose
     // into sub-queries, retrieve each, union by event id, and keep the best
     // topK summaries — surfaces facts a single query misses (the recall lever).
+    // Each snippet is prefixed with the event's valid-at date so the answer
+    // model has the temporal anchor it needs for date-difference questions.
     private async Task<IReadOnlyList<string>> RetrieveContextAsync(
-        IMemoryQueryAPI query, CapabilityToken token, WorkstreamId ws, string question, CancellationToken ct)
+        IMemoryQueryAPI query, CapabilityToken token, WorkstreamId ws, string question, int limit, CancellationToken ct)
     {
         var queries = _planner is null ? new[] { question } : (await _planner.PlanAsync(question, ct).ConfigureAwait(false)).ToArray();
-        var best = new Dictionary<string, (double Score, string Summary)>();
+        var best = new Dictionary<string, (double Score, string Text)>();
         foreach (var q in queries)
         {
-            var res = await query.QueryAsync(new QueryRequest(new QuerySpec(ws, FreeText: q, Limit: _topK)), token, ct).ConfigureAwait(false);
+            var res = await query.QueryAsync(new QueryRequest(new QuerySpec(ws, FreeText: q, Limit: limit)), token, ct).ConfigureAwait(false);
             foreach (var item in res.Items)
             {
+                var dated = $"[{item.ValidAt:yyyy-MM-dd}] {item.Summary}";
                 if (!best.TryGetValue(item.EventId.Value, out var cur) || item.Score > cur.Score)
-                    best[item.EventId.Value] = (item.Score, item.Summary);
+                    best[item.EventId.Value] = (item.Score, dated);
             }
         }
-        return best.Values.OrderByDescending(v => v.Score).Take(_topK).Select(v => v.Summary).ToArray();
+        return best.Values.OrderByDescending(v => v.Score).Take(limit).Select(v => v.Text).ToArray();
     }
+
+    private static bool IsAbstention(string answer) =>
+        string.IsNullOrWhiteSpace(answer) ||
+        answer.Contains("don't know", StringComparison.OrdinalIgnoreCase) ||
+        answer.Contains("dont know", StringComparison.OrdinalIgnoreCase) ||
+        answer.Contains("not enough", StringComparison.OrdinalIgnoreCase) ||
+        answer.Contains("no information", StringComparison.OrdinalIgnoreCase) ||
+        answer.StartsWith("[error]", StringComparison.OrdinalIgnoreCase);
 
     // Chunk the conversation and run Mneme's session distiller over each window,
     // turning raw turns into atomic Fact events (with session-range citations).
