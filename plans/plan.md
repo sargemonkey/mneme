@@ -32,7 +32,7 @@
 
 ### Benchmarks
 - **`Mneme.Benchmarks.Perf`** — storage-layer latency (BenchmarkDotNet). Ingest ~1.4ms/event; queries sub-ms–low-ms.
-- **`Mneme.Benchmarks.LoCoMo`** — accuracy benchmark vs Mem0/Zep. Best live result (stratified 245 Q across all 10 conversations, both+rerank+iterative+hybrid-judge, gpt-4o-mini): **41.6% overall, 334 tokens/query** (single 76%, multi-hop 52%, open-domain 42%, temporal 20%, adversarial 18%). Retrieval levers shipped: hybrid semantic+BM25, cross-encoder rerank, iterative multi-hop, date-stamped context, recall-retry. See `benchmarks/Mneme.Benchmarks.LoCoMo/ANALYSIS.md` for the full progression + dip breakdown.
+- **`Mneme.Benchmarks.LoCoMo`** — accuracy benchmark vs Mem0/Zep. Best live result (stratified 245 Q across all 10 conversations, both+rerank+iterative+date-context+recall-retry+hybrid-judge, gpt-4o-mini): **53.5% overall, 341 tokens/query** (single 84%, temporal 64%, open-domain 51%, multi-hop 52%, adversarial 16%). Retrieval levers shipped: hybrid semantic+BM25, cross-encoder rerank, iterative multi-hop, date-stamped context, recall-retry. See `benchmarks/Mneme.Benchmarks.LoCoMo/ANALYSIS.md` for the full progression + dip breakdown.
 
 ### Six host-pluggable seams (all in `Mneme.Contracts`, BCL-only)
 `ISessionDistiller`, `IDistiller`, `IEmbeddingProvider`, `IEntityProposer`,

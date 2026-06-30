@@ -12,28 +12,35 @@ the gaps are versus published numbers from other memory layers (Mem0, Zep).
 
 ### Headline: stratified sample across ALL 10 conversations (245 Q)
 
-Best config — both-mode + rerank + iterative multi-hop retrieval + hybrid
-judge, gpt-4o-mini + text-embedding-3-small, k=20. 245 questions sampled
-evenly across all 10 LoCoMo conversations and all 5 categories (~50 each):
+Best config — both-mode + rerank + iterative multi-hop retrieval +
+**date-stamped context** + **recall-retry** + hybrid judge, gpt-4o-mini +
+text-embedding-3-small, k=20. 245 questions sampled evenly across all 10
+LoCoMo conversations and all 5 categories (~50 each):
 
-| Category | n | Accuracy |
-|---|---:|---:|
-| single-hop | 50 | 76.0% |
-| multi-hop | 50 | **52.0%** |
-| open-domain | 45 | 42.2% |
-| adversarial | 50 | 18.0% |
-| temporal | 50 | 20.0% |
-| **Overall** | **245** | **41.6%** |
+| Category | n | v1 (no dates/retry) | **v2 (dates+retry)** |
+|---|---:|---:|---:|
+| single-hop | 50 | 76.0% | **84.0%** |
+| temporal | 50 | 20.0% | **64.0%** |
+| open-domain | 45 | 42.2% | **51.1%** |
+| multi-hop | 50 | 52.0% | 52.0% |
+| adversarial | 50 | 18.0% | 16.0% |
+| **Overall** | **245** | 41.6% | **53.5%** |
 
-Mean context: 334 tokens/query (vs Mem0 ~6,956, Zep ~1,600).
+Mean context: 341 tokens/query (vs Mem0 ~6,956, Zep ~1,600).
 
-This is the most representative Mneme number to date (all 10 conversations, not
-one). Two things stand out vs the early single-conversation runs:
-- **multi-hop 22% → 52%** — iterative retrieval (decompose → retrieve each hop →
-  union) is doing exactly what the miss-analysis predicted. It's now a *strength*.
-- **temporal collapsed to 20%** — across the full corpus, date-difference
-  reasoning is the new weakest link (the single conv-26 sample happened to have
-  easier temporal questions at 43%). Adversarial (18%) remains hard.
+**+11.9pp overall** from two targeted fixes on the same question set:
+- **Temporal 20% → 64% (3.2×)** — surfacing each event's `[YYYY-MM-DD]` date
+  into the retrieved snippet (the dates were already in Mneme's bi-temporal
+  `valid_at`; they just weren't reaching the answer model) + instructing it to
+  compute intervals. This was the single biggest lever in the whole arc.
+- **single-hop 76 → 84, open-domain 42 → 51** — dates also help "when did X"
+  factoid questions and ground inference questions.
+- **multi-hop flat (52%)** — already addressed by iterative retrieval.
+- **adversarial flat (18 → 16%, within noise)** — buried single-fact lookup is
+  *not* helped by dates, and recall-retry's wider net only occasionally surfaces
+  the needle. This is the one genuinely-unsolved category and the top remaining
+  lever (needs higher base recall: bigger k + a stronger/true cross-encoder, or
+  a fact-verification pass).
 
 ### Improvement progression (single conversation, conv-26, 199 Q)
 
@@ -192,12 +199,14 @@ weakest, and they set the overall:
    22% → 52% across the full corpus (now a strength).
 3. ✅ **F1/hybrid judge** + **question concurrency** — shipped; +2.5pp from
    judge parity; concurrency made the 10-conversation run tractable.
-4. **Temporal reasoning** — now the weakest category (20% across the corpus).
-   Surface event dates into snippets, add date-difference computation in the
-   answer step, and a temporal-aware retrieval path. **The top remaining lever.**
-5. **Adversarial recall** (18%) — buried single-fact lookup; needs higher k +
-   stronger rerank, or a verification pass.
-6. **Throughput** — GitHub Models concurrency-limits hard (heavy 429s above ~3
-   in-flight, regardless of the 20k/min request budget). For the full 1,986-Q
-   run, either accept ~2h at concurrency 2–3 (resume-driven) or use a provider
-   with higher concurrency.
+4. ✅ **Date-stamped context** (temporal) — shipped; temporal 20% → 64% (3.2×),
+   the single biggest lever. Dates were already in Mneme's bi-temporal model;
+   they just needed surfacing into the answer context.
+5. ✅ **Recall-retry on abstention** (adversarial) — shipped; wider net + re-
+   answer when the model abstains. Marginal here — adversarial stayed ~flat.
+6. **Adversarial recall (16%)** — the one unsolved category. Buried single-fact
+   lookup needs higher base recall: larger k into a *true* cross-encoder (not
+   the LLM-listwise stand-in), or a fact-verification pass. **Top remaining lever.**
+7. **Throughput** — GitHub Models concurrency-limits hard (heavy 429s above ~3
+   in-flight, regardless of the 20k/min request budget). Full 1,986-Q run is
+   ~2h at concurrency 2–3 (resume-driven) or needs a higher-concurrency provider.
