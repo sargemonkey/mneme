@@ -111,7 +111,7 @@ public sealed class ThrottledHttp : IDisposable
             await Task.Delay(ra + TimeSpan.FromMilliseconds(250), ct).ConfigureAwait(false);
             return;
         }
-        var seconds = Math.Min(60, Math.Pow(2, attempt)); // 1,2,4,8,16,32,60…
+        var seconds = Math.Min(15, Math.Pow(2, attempt)); // 1,2,4,8,15,15… (concurrency 429s clear fast)
         var jitter = Random.Shared.NextDouble() * 0.5;
         await Task.Delay(TimeSpan.FromSeconds(seconds + jitter), ct).ConfigureAwait(false);
     }

@@ -138,12 +138,25 @@ public sealed class LoCoMoEvaluator
                 try
                 {
                     var qa = sample.Questions[qi];
-                    var context = await RetrieveContextAsync(query, token, ws, qa.Question, ct).ConfigureAwait(false);
-                    var contextTokens = context.Sum(ApproxTokens);
-                    var predicted = await _answerer.AnswerAsync(qa.Question, context, ct).ConfigureAwait(false);
-                    var correct = await _judge.IsCorrectAsync(qa.Question, qa.Answer, predicted, ct).ConfigureAwait(false);
-                    var record = new QaRecord(sample.SampleId, qi, qa.CategoryId, qa.CategoryLabel,
-                        qa.Question, qa.Answer, predicted, correct, contextTokens);
+                    QaRecord record;
+                    try
+                    {
+                        var context = await RetrieveContextAsync(query, token, ws, qa.Question, ct).ConfigureAwait(false);
+                        var contextTokens = context.Sum(ApproxTokens);
+                        var predicted = await _answerer.AnswerAsync(qa.Question, context, ct).ConfigureAwait(false);
+                        var correct = await _judge.IsCorrectAsync(qa.Question, qa.Answer, predicted, ct).ConfigureAwait(false);
+                        record = new QaRecord(sample.SampleId, qi, qa.CategoryId, qa.CategoryLabel,
+                            qa.Question, qa.Answer, predicted, correct, contextTokens);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        // A question that fails even after retries is recorded as
+                        // an incorrect "[error]" rather than crashing the whole
+                        // run. It can be re-attempted later (delete its line + resume).
+                        Console.Error.WriteLine($"    q{qi} failed: {ex.GetType().Name}: {Trunc(ex.Message)}");
+                        record = new QaRecord(sample.SampleId, qi, qa.CategoryId, qa.CategoryLabel,
+                            qa.Question, qa.Answer, "[error]", false, 0);
+                    }
                     lock (sink)
                     {
                         records.Add(record);
@@ -226,6 +239,8 @@ public sealed class LoCoMoEvaluator
     // Rough token estimate (~0.75 words/token) for the context-size column.
     private static int ApproxTokens(string s) =>
         (int)Math.Ceiling(s.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length / 0.75);
+
+    private static string Trunc(string s) => s.Length <= 120 ? s : s[..120] + "…";
 }
 
 /// <summary>Aggregated LoCoMo scores: overall + per-category accuracy and mean context tokens.</summary>
