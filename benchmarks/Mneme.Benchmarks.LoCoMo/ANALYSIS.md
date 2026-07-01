@@ -42,6 +42,36 @@ Mean context: 341 tokens/query (vs Mem0 ~6,956, Zep ~1,600).
   lever (needs higher base recall: bigger k + a stronger/true cross-encoder, or
   a fact-verification pass).
 
+### Reranker routing: local ONNX cross-encoder vs LLM-listwise
+
+Same 245-Q full-corpus set + config; only the `IReranker` implementation
+swapped (one `--reranker onnx|llm` flag). This tests whether the seam is
+genuinely provider-routable — and whether a *true* cross-encoder cracks
+adversarial.
+
+| Category | LLM-listwise (GitHub Models) | **ONNX cross-encoder (local, offline)** |
+|---|---:|---:|
+| single-hop | 84.0% | **86.0%** |
+| temporal | 64.0% | 54.0% |
+| open-domain | 51.1% | 46.7% |
+| multi-hop | 52.0% | 52.0% |
+| adversarial | 16.0% | **20.0%** |
+| **Overall** | **53.5%** | 51.8% |
+| rerank API calls | 1 chat call/question | **0 (fully local)** |
+
+Two findings:
+- **The two rerankers are within run-to-run noise on overall** (53.5 vs 51.8) —
+  the `ms-marco-MiniLM-L-6-v2` ONNX cross-encoder matches the LLM reranker
+  **with zero API calls, fully offline**. That's the routing win: rerank
+  on-device, no key, no network, swapped behind `IReranker` with a single flag
+  and **no change to Mneme** (`Mneme.Contracts` ships only the interface).
+- **Adversarial barely moved (16 → 20%)** even with a real cross-encoder —
+  decisive evidence that adversarial is **not a ranking problem**. The buried
+  single fact either isn't in the candidate pool (recall) or was generalized
+  away by distillation; a reranker can only reorder what retrieval surfaced.
+  The fix is upstream: higher base recall + finer-grained distillation. This
+  is the one genuinely-open category.
+
 ### Improvement progression (single conversation, conv-26, 199 Q)
 
 Each lever added on top of the previous, gpt-4o-mini + text-embedding-3-small:
