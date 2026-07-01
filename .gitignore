@@ -60,3 +60,6 @@ BenchmarkDotNet.Artifacts/
 
 # LoCoMo dataset + run outputs (third-party data; not vendored)
 datasets/
+
+# ONNX reranker model (downloadable; not vendored)
+benchmarks/Mneme.Benchmarks.LoCoMo/models/*.onnx

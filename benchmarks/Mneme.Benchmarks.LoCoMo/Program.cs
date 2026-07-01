@@ -77,8 +77,13 @@ internal static class Program
             _ => judge,
         };
 
-        var reranker = args.Contains("--rerank") && answerer is IChatCompletion chat
-            ? new LlmReranker(chat) : null;
+        var rerankArg = (GetArg(args, "--reranker") ?? (args.Contains("--rerank") ? "llm" : "off")).Trim().ToLowerInvariant();
+        IReranker? reranker = rerankArg switch
+        {
+            "onnx" => BuildOnnxReranker(),
+            "llm" => answerer is IChatCompletion chat ? new LlmReranker(chat) : null,
+            _ => null,
+        };
         var planner = args.Contains("--iterative") && answerer is IChatCompletion pchat
             ? new QueryPlanner(pchat) : null;
         var concurrency = int.TryParse(GetArg(args, "--concurrency"), out var cc) ? cc : 1;
@@ -201,5 +206,17 @@ internal static class Program
     {
         var i = Array.IndexOf(args, name);
         return i >= 0 && i + 1 < args.Length ? args[i + 1] : null;
+    }
+
+    private static IReranker? BuildOnnxReranker()
+    {
+        var model = Path.Combine(AppContext.BaseDirectory, "models", "ms-marco-MiniLM-L6.onnx");
+        var vocab = Path.Combine(AppContext.BaseDirectory, "models", "vocab.txt");
+        if (!File.Exists(model) || !File.Exists(vocab))
+        {
+            Console.Error.WriteLine($"ONNX reranker model not found under {Path.GetDirectoryName(model)}; falling back to no rerank.");
+            return null;
+        }
+        return new OnnxCrossEncoderReranker(model, vocab);
     }
 }
