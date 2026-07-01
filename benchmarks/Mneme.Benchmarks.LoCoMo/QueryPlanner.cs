@@ -15,10 +15,14 @@ public sealed class QueryPlanner
     public QueryPlanner(IChatCompletion chat) { _chat = chat; }
 
     private const string System = """
-        Break a question into the minimal set of focused retrieval queries
-        needed to answer it. Use multiple only for multi-hop questions; one is
-        fine for simple ones. Each query is a short keyword phrase.
-        Reply JSON only: {"queries":["...","..."]}  (max 3)
+        You expand a question into retrieval queries that will find the answer in
+        a long conversation. Produce:
+        - "queries": the minimal focused sub-queries (short keyword phrases; use
+          several only for multi-hop questions, one for simple ones).
+        - "hyde": ONE hypothetical answer sentence — a plausible, specific
+          sentence that would appear in the conversation if it stated the answer
+          (this is used as an extra retrieval probe; it need not be true).
+        Reply JSON only: {"queries":["...","..."],"hyde":"..."}  (max 3 queries)
         """;
 
     public async Task<IReadOnlyList<string>> PlanAsync(string question, CancellationToken ct = default)
@@ -40,6 +44,13 @@ public sealed class QueryPlanner
                             set.Add(s.Trim());
                         if (set.Count >= 4) break;
                     }
+                }
+                // HyDE: a hypothetical answer sentence is often lexically/semantically
+                // closer to the stored fact than the question is — a strong recall probe.
+                if (doc.RootElement.TryGetProperty("hyde", out var h) && h.ValueKind == JsonValueKind.String)
+                {
+                    var hyde = h.GetString();
+                    if (!string.IsNullOrWhiteSpace(hyde)) set.Add(hyde.Trim());
                 }
             }
         }

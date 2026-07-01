@@ -43,7 +43,7 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
     private const int HardLimit = 500;
     private const string Distiller = "phase4-degraded";
     private const double SemanticThreshold = 0.1;
-    private const int RerankPool = 60;
+    private const int RerankPool = 150;
 
     private readonly SqliteConnectionFactory _connections;
     private readonly TextSearchService _search;

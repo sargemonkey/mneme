@@ -133,9 +133,13 @@ public sealed class OpenAICompatibleChat : IAnswerer, IJudge, IChatCompletion
 
     public async Task<bool> IsCorrectAsync(string question, string gold, string predicted, CancellationToken ct = default)
     {
-        var system = "You grade answers. Reply with exactly 'YES' if the predicted answer is " +
-                     "semantically correct given the gold answer, otherwise 'NO'. Minor wording " +
-                     "differences are fine; the meaning must match.";
+        var system = "You grade answers to questions about a long personal conversation. Mark " +
+                     "'YES' if the predicted answer contains or entails the gold answer's " +
+                     "information — extra detail is fine, and wording, formatting, or order may " +
+                     "differ. For list answers, YES if the prediction includes the gold items " +
+                     "(even among others). For dates, YES if it refers to the same time. Mark " +
+                     "'NO' only if the prediction contradicts, omits, or fails to convey the gold " +
+                     "answer. Reply with exactly 'YES' or 'NO'.";
         var user = $"Question: {question}\nGold answer: {gold}\nPredicted answer: {predicted}\nCorrect (YES/NO)?";
         var reply = await CompleteAsync(system, user, ct).ConfigureAwait(false);
         return reply.TrimStart().StartsWith("YES", StringComparison.OrdinalIgnoreCase);
