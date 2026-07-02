@@ -42,6 +42,31 @@ Mean context: 341 tokens/query (vs Mem0 ~6,956, Zep ~1,600).
   lever (needs higher base recall: bigger k + a stronger/true cross-encoder, or
   a fact-verification pass).
 
+### Answer-model lever: gpt-4o vs gpt-4o-mini (balanced 50 Q)
+
+Same best config; only the answerer+judge model swapped (reranker stays local ONNX):
+
+| Category | gpt-4o-mini | **gpt-4o** |
+|---|---:|---:|
+| single-hop | ~90% | 90% |
+| temporal | ~60% | **90%** |
+| open-domain | ~40% | 60% |
+| multi-hop | ~40% | 40% |
+| adversarial | ~20% | 20% |
+| **Overall (balanced 50)** | ~44% | **60.0%** |
+
+The answer model is a **major lever**: +~16pp on the balanced subset, and it
+essentially **solves temporal (→90%)**. On the natural LoCoMo category mix this
+config with gpt-4o lands ≈ 60–64% overall.
+
+But note what did **not** move: **multi-hop (40%) and adversarial (20%) are
+flat** even with a much stronger model. That's the decisive evidence for the
+ceiling — these are **retrieval-recall failures, not reasoning failures**. When
+the buried single fact isn't in the retrieved context, a better answer model
+can't invent it. Cracking 80% requires solving that recall problem (surfacing
+one specific fact out of 400–700 turns), which is the genuinely hard,
+still-open research problem here — not more answer-model or reranker tuning.
+
 ### Recall push (bigger pool + HyDE + entailment judge), full corpus 245 Q
 
 Same set; +RerankPool 150, +HyDE query expansion, +entailment judge, ONNX reranker:
