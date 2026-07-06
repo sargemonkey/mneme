@@ -12,6 +12,8 @@ namespace Mneme.Benchmarks.LoCoMo;
 ///   --dataset &lt;path&gt;   LoCoMo JSON (default: bundled mini fixture).
 ///   --k &lt;int&gt;          Top-k memory snippets retrieved per question (default 10).
 ///   --limit &lt;int&gt;      Max samples to evaluate (default: all).
+///   --categories &lt;a,b&gt; Only evaluate questions in these category labels
+///                      (e.g. adversarial,multi-hop). Default: all.
 ///   --out &lt;dir&gt;        Output directory for results.jsonl + results.csv
 ///                      (default: &lt;build-dir&gt;/locomo-results).
 ///   --fresh            Ignore + overwrite any prior results in --out.
@@ -88,11 +90,16 @@ internal static class Program
             ? new QueryPlanner(pchat) : null;
         var concurrency = int.TryParse(GetArg(args, "--concurrency"), out var cc) ? cc : 1;
         var recallRetry = args.Contains("--recall-retry");
+        var categoriesArg = GetArg(args, "--categories");
+        var categories = string.IsNullOrWhiteSpace(categoriesArg) ? null
+            : new HashSet<string>(categoriesArg.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                StringComparer.OrdinalIgnoreCase);
         Console.Error.WriteLine($"Mode: {mode}   ingest: {ingestMode.ToString().ToLowerInvariant()}" +
                                 $"   judge: {judgeArg}   concurrency: {concurrency}" +
                                 (reranker is not null ? "   rerank: on" : "") +
                                 (planner is not null ? "   iterative: on" : "") +
-                                (recallRetry ? "   recall-retry: on" : ""));
+                                (recallRetry ? "   recall-retry: on" : "") +
+                                (categories is not null ? $"   categories: {string.Join(",", categories)}" : ""));
 
         var dataRoot = Path.Combine(AppContext.BaseDirectory, "locomo-data");
         var outDir = GetArg(args, "--out") ?? Path.Combine(AppContext.BaseDirectory, "locomo-results");
@@ -103,7 +110,7 @@ internal static class Program
             Console.Error.WriteLine("--fresh: cleared any prior results, starting over.");
         }
 
-        var evaluator = new LoCoMoEvaluator(dataRoot, embedder, answerer, judge, distiller, reranker, planner, ingestMode, topK, concurrency, recallRetry);
+        var evaluator = new LoCoMoEvaluator(dataRoot, embedder, answerer, judge, distiller, reranker, planner, ingestMode, topK, concurrency, recallRetry, categories, args.Contains("--reuse-db"));
 
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };

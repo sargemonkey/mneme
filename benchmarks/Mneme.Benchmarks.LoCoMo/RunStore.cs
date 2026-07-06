@@ -17,7 +17,8 @@ public sealed record QaRecord(
     string Gold,
     string Predicted,
     bool Correct,
-    int ContextTokens);
+    int ContextTokens,
+    bool? GoldInContext = null);
 
 /// <summary>
 /// Append-only JSONL store of graded questions. Lets a long LoCoMo run survive

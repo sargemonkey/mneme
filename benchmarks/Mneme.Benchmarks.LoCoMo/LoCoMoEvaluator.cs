@@ -37,11 +37,15 @@ public sealed class LoCoMoEvaluator
     private readonly int _topK;
     private readonly int _concurrency;
     private readonly bool _recallRetry;
+    private readonly IReadOnlySet<string>? _categories;
+    private readonly bool _reuseDb;
 
     public LoCoMoEvaluator(string dataRoot, IEmbeddingProvider embedder, IAnswerer answerer, IJudge judge,
         ISessionDistiller? distiller, IReranker? reranker, QueryPlanner? planner, IngestMode mode, int topK,
-        int concurrency = 1, bool recallRetry = false)
+        int concurrency = 1, bool recallRetry = false, IReadOnlySet<string>? categories = null, bool reuseDb = false)
     {
+        _categories = categories is { Count: > 0 } ? categories : null;
+        _reuseDb = reuseDb;
         _dataRoot = dataRoot;
         _embedder = embedder;
         _answerer = answerer;
@@ -76,14 +80,16 @@ public sealed class LoCoMoEvaluator
 
             // Skip ingest/embed entirely if every question in this sample is done.
             var allDone = sample.Questions.Count > 0 &&
-                Enumerable.Range(0, sample.Questions.Count).All(qi => existing.ContainsKey((sample.SampleId, qi)));
+                Enumerable.Range(0, sample.Questions.Count).Where(qi => IsSelected(sample, qi))
+                    .All(qi => existing.ContainsKey((sample.SampleId, qi)));
             if (allDone)
             {
                 for (var qi = 0; qi < sample.Questions.Count; qi++)
                 {
-                    records.Add(existing[(sample.SampleId, qi)]);
+                    if (IsSelected(sample, qi) && existing.TryGetValue((sample.SampleId, qi), out var cached))
+                        records.Add(cached);
                 }
-                Console.Error.WriteLine($"[{sampleIndex}/{samples.Count}] {sample.SampleId}: all {sample.Questions.Count} cached, skipping.");
+                Console.Error.WriteLine($"[{sampleIndex}/{samples.Count}] {sample.SampleId}: all selected cached, skipping.");
                 continue;
             }
 
@@ -93,8 +99,16 @@ public sealed class LoCoMoEvaluator
             var (agent, query, token, vectors) = BuildWorkstream(sample.SampleId);
             var ws = new WorkstreamId(sample.SampleId);
 
+            // --reuse-db: skip re-ingest/distill/embed when a prior run already
+            // built this workstream's DB. Isolates the read stage for fast A/Bs.
+            var reused = _reuseDb && vectors.HasEmbeddings(ws);
+            if (reused)
+            {
+                Console.Error.WriteLine($"    reusing existing DB for {sample.SampleId} (skipping ingest/distill/embed)");
+            }
+
             // Load the conversation per the configured ingest mode.
-            if (_mode is IngestMode.Turns or IngestMode.Both)
+            if (!reused && _mode is IngestMode.Turns or IngestMode.Both)
             {
                 var n = 0;
                 foreach (var turn in sample.Turns)
@@ -111,26 +125,29 @@ public sealed class LoCoMoEvaluator
                     n++;
                 }
             }
-            if (_mode is IngestMode.Facts or IngestMode.Both)
+            if (!reused && _mode is IngestMode.Facts or IngestMode.Both)
             {
                 await DistillConversationAsync(agent, sample, token, ct).ConfigureAwait(false);
             }
 
             // Embed everything ingested (turns and/or facts) for semantic retrieval.
-            await vectors.BackfillAsync(ws, ct).ConfigureAwait(false);
+            if (!reused)
+            {
+                await vectors.BackfillAsync(ws, ct).ConfigureAwait(false);
+            }
 
             // Answer + judge each pending question, up to _concurrency in flight.
             // Ingest/embed above is sequential; only the LLM-heavy read+answer+
             // judge phase is parallelized (GitHub Models allows 20k req/min, so
             // the run is latency-bound — concurrency is the real speedup).
             var pending = Enumerable.Range(0, sample.Questions.Count)
-                .Where(qi => !existing.ContainsKey((sample.SampleId, qi)))
+                .Where(qi => IsSelected(sample, qi) && !existing.ContainsKey((sample.SampleId, qi)))
                 .ToArray();
             foreach (var qi in Enumerable.Range(0, sample.Questions.Count).Where(existsCached))
             {
                 records.Add(existing[(sample.SampleId, qi)]);
             }
-            bool existsCached(int qi) => existing.ContainsKey((sample.SampleId, qi));
+            bool existsCached(int qi) => IsSelected(sample, qi) && existing.ContainsKey((sample.SampleId, qi));
 
             var gate = new SemaphoreSlim(_concurrency);
             var sink = new object();
@@ -159,8 +176,9 @@ public sealed class LoCoMoEvaluator
 
                         var contextTokens = context.Sum(ApproxTokens);
                         var correct = await _judge.IsCorrectAsync(qa.Question, qa.Answer, predicted, ct).ConfigureAwait(false);
+                        var goldInContext = GoldSupportedBy(qa.Answer, context);
                         record = new QaRecord(sample.SampleId, qi, qa.CategoryId, qa.CategoryLabel,
-                            qa.Question, qa.Answer, predicted, correct, contextTokens);
+                            qa.Question, qa.Answer, predicted, correct, contextTokens, goldInContext);
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {
@@ -210,6 +228,32 @@ public sealed class LoCoMoEvaluator
         return best.Values.OrderByDescending(v => v.Score).Take(limit).Select(v => v.Text).ToArray();
     }
 
+    private bool IsSelected(LoCoMoSample sample, int qi) =>
+        _categories is null || _categories.Contains(sample.Questions[qi].CategoryLabel);
+
+    // Diagnostic: is the gold answer's content actually present in the retrieved
+    // snippets shown to the answer model? Token-recall ≥ 0.6 of gold's content
+    // words (stopwords/short tokens dropped). Separates a retrieval miss (gold
+    // absent → fix retrieval) from a generation miss (gold present, wrong/abstained
+    // answer → fix the answer step). Not a scoring signal; recorded for analysis.
+    private static readonly HashSet<string> StopWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "the","a","an","is","was","were","of","to","in","on","at","for","and","with",
+        "from","this","that","what","did","do","does","how","when","where","who","why","her","his",
+    };
+
+    private static bool GoldSupportedBy(string gold, IReadOnlyList<string> context)
+    {
+        var goldTokens = Tokenize(gold).Where(t => t.Length > 2 && !StopWords.Contains(t)).ToArray();
+        if (goldTokens.Length == 0) return false;
+        var haystack = string.Join(" \n ", context).ToLowerInvariant();
+        var hits = goldTokens.Count(t => haystack.Contains(t, StringComparison.Ordinal));
+        return (double)hits / goldTokens.Length >= 0.6;
+    }
+
+    private static IEnumerable<string> Tokenize(string s) =>
+        System.Text.RegularExpressions.Regex.Matches(s.ToLowerInvariant(), "[a-z0-9]+").Select(m => m.Value);
+
     private static bool IsAbstention(string answer) =>
         string.IsNullOrWhiteSpace(answer) ||
         answer.Contains("don't know", StringComparison.OrdinalIgnoreCase) ||
@@ -242,7 +286,7 @@ public sealed class LoCoMoEvaluator
         BuildWorkstream(string sampleId)
     {
         var dbPath = Path.Combine(_dataRoot, sampleId + ".db");
-        if (File.Exists(dbPath)) File.Delete(dbPath);
+        if (!(_reuseDb && File.Exists(dbPath)) && File.Exists(dbPath)) File.Delete(dbPath);
 
         var services = new ServiceCollection();
         services.AddMneme(o =>

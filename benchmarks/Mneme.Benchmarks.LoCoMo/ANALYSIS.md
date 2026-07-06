@@ -297,3 +297,63 @@ weakest, and they set the overall:
 7. **Throughput** — GitHub Models concurrency-limits hard (heavy 429s above ~3
    in-flight, regardless of the 20k/min request budget). Full 1,986-Q run is
    ~2h at concurrency 2–3 (resume-driven) or needs a higher-concurrency provider.
+
+---
+
+## Diagnosis: why adversarial + multi-hop stall (controlled A/B, 2026-07-02)
+
+Population: first-3 conversations (conv-26/30/41), **186** adversarial+multi-hop
+questions, `--reuse-db` (identical distilled facts across all runs so only the
+tested variable moves). Answerer/judge = gpt-4o-mini. Retrieval depth k=25.
+
+### Experiment 1 — is the reranker the lever? **No (net-neutral).**
+
+| Config | multi-hop | adversarial | overall |
+|---|---:|---:|---:|
+| reranker **off** (hybrid fusion top-25) | 62.2% | 17.0% | 34.9% |
+| reranker **onnx** (pool 150 → rerank → top-25) | 62.2% | 17.0% | 34.9% |
+
+Per-question: **101/186 predictions differ, 30 correctness flips — but net = 65 = 65.**
+The reranker fixes ~15 and breaks ~15. Because the answer model already sees all
+25 snippets, reordering *within* the pool is invisible unless it changes *membership*,
+and at the boundary it is a wash. **Reranking is not the bottleneck.**
+
+### Experiment 2 — is the gold fact even reaching the answer model? **Mostly yes.**
+
+`GoldInContext` = gold answer's content tokens present in the 25 snippets fed to
+the model (token-recall ≥ 0.6).
+
+| Category | acc | gold-in-context | misses w/ gold present | of those: **abstained** | true recall miss |
+|---|---:|---:|---:|---:|---:|
+| adversarial | 16% | **78%** | 75/94 (79%) | **63** | 19 (20%) |
+| multi-hop | 60% | 64% | 15/29 (51%) | 4 | 14 (48%) |
+| ALL | 33% | 73% | 90/123 (73%) | 67 | 33 (26%) |
+
+Only **26%** of misses are true recall misses. Adversarial acc is 16% despite
+the gold token appearing in-context 78% of the time.
+
+### Experiment 3 — force the model to commit (anti-abstention prompt). **Backfired.**
+
+| adversarial | abstained | correct |
+|---|---:|---:|
+| original prompt | 77/112 | 18 |
+| +attribution/anti-abstention prompt | **90/112** | **14** |
+
+Adding "answer only from snippets about that exact person; don't abstain merely
+from uncertainty" made the model abstain **more** (77→90) and score **less**. When
+it applies strict attribution it discovers the in-context gold token is attached to
+a **distractor** (another person), not the queried entity — so it correctly declines.
+
+### Conclusion
+
+The adversarial collapse is **not recall** and **not reranking** — it is
+**entity attribution**: the gold *token* is in context, but a fact **cleanly
+attributed to the person named in the question** often is not (distractors about
+other people crowd the top-25). Multi-hop is genuinely half-retrieval (48% true miss).
+
+**Next build → entity-anchored retrieval** (research rec #2, HippoRAG-lite family):
+extract the entity named in the question, boost/hard-filter snippets that mention
+that exact entity, and gather multi-hop evidence along entity→event adjacency.
+Reuses Mneme's Phase-6 entity resolution; pure SQLite, no graph DB. Proposition
+indexing (research rec #1) is already covered by Mneme's distilled-fact index —
+which is why true recall miss is only 26%.

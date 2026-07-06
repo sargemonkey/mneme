@@ -159,6 +159,23 @@ public sealed class VectorIndex
         return pending;
     }
 
+    /// <summary>
+    /// True when at least one stored vector exists for the workstream under the
+    /// current provider. Lets a caller skip re-ingest/embed when a prior run
+    /// already populated the index (used by the benchmark harness' --reuse-db).
+    /// </summary>
+    public bool HasEmbeddings(WorkstreamId workstream)
+    {
+        if (_provider is null) return false;
+        WorkstreamIdValidator.EnsureValid(workstream.Value, nameof(workstream));
+        using var c = _connections.Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT EXISTS(SELECT 1 FROM event_embeddings WHERE workstream_id = $ws AND provider_id = $pid);";
+        cmd.Parameters.AddWithValue("$ws", workstream.Value);
+        cmd.Parameters.AddWithValue("$pid", _provider.Id);
+        return Convert.ToInt64(cmd.ExecuteScalar(), CultureInfo.InvariantCulture) != 0;
+    }
+
     private List<(string EventId, DateTimeOffset CreatedAt, float[] Vector)> LoadVectors(WorkstreamId ws, string providerId)
     {
         var rows = new List<(string, DateTimeOffset, float[])>();
