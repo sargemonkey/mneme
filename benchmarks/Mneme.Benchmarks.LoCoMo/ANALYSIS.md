@@ -357,3 +357,37 @@ that exact entity, and gather multi-hop evidence along entity→event adjacency.
 Reuses Mneme's Phase-6 entity resolution; pure SQLite, no graph DB. Proposition
 indexing (research rec #1) is already covered by Mneme's distilled-fact index —
 which is why true recall miss is only 26%.
+
+### Experiment 4 — entity-mention boost. **Flat (negative result).**
+
+| Config | multi-hop | adversarial | overall |
+|---|---:|---:|---:|
+| baseline (reranker off) | 62.2% | 17.0% | 34.9% |
+| + `--entity-boost` (float facts mentioning a query proper-noun) | 60.8% | 16.1% | 33.9% |
+
+**Why it fails — the two-speaker naming problem.** Mneme's distiller resolves
+pronouns to names, so in a 2-party LoCoMo conversation *both participants are named
+in almost every fact*: "Caroline" appears in **149/247** distilled facts, "Melanie"
+in **105/247**. Boosting "facts that mention the query entity" therefore selects
+~half the corpus and discriminates nothing — the distractor facts name the entity too.
+
+**And the answer is often not in any fact at all.** For "What country is Melanie's
+grandma from? → Sweden", **0 of 105 Melanie-facts contain 'Sweden'** — the fact
+extractor dropped the grandma's nationality; the token survives only in a raw turn
+(hence `GoldInContext` = true via the `both` turn index, but no *attributable fact*
+supports it).
+
+### Final synthesis — what actually gates adversarial
+
+Entity-*mention* is the wrong primitive. Closing adversarial needs **subject-scoped
+facts**: extract `(subject_entity, predicate, object)` triples where the subject is a
+*resolved* entity + relation path (Melanie → grandma → country), and retrieve by
+matching the question's subject-chain — not by name co-occurrence. That is the
+knowledge-graph investment Zep/Graphiti make, and it is a distillation-layer upgrade
+(SVO extraction + entity-scoped fact index), not a retrieval toggle.
+
+Mneme's current strengths are orthogonal and real: temporal (64–90%), single-hop
+(88%). The adversarial gap is an architectural tradeoff of a statement-level fact log
+vs. an SVO-triple graph — a deliberate, scoped build, not a quick lever. Recommend
+promoting subject-attributed fact extraction to the backlog rather than chasing
+benchmark-local hacks.

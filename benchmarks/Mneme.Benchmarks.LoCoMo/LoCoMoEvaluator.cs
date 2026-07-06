@@ -39,13 +39,16 @@ public sealed class LoCoMoEvaluator
     private readonly bool _recallRetry;
     private readonly IReadOnlySet<string>? _categories;
     private readonly bool _reuseDb;
+    private readonly bool _entityBoost;
 
     public LoCoMoEvaluator(string dataRoot, IEmbeddingProvider embedder, IAnswerer answerer, IJudge judge,
         ISessionDistiller? distiller, IReranker? reranker, QueryPlanner? planner, IngestMode mode, int topK,
-        int concurrency = 1, bool recallRetry = false, IReadOnlySet<string>? categories = null, bool reuseDb = false)
+        int concurrency = 1, bool recallRetry = false, IReadOnlySet<string>? categories = null, bool reuseDb = false,
+        bool entityBoost = false)
     {
         _categories = categories is { Count: > 0 } ? categories : null;
         _reuseDb = reuseDb;
+        _entityBoost = entityBoost;
         _dataRoot = dataRoot;
         _embedder = embedder;
         _answerer = answerer;
@@ -214,19 +217,52 @@ public sealed class LoCoMoEvaluator
         IMemoryQueryAPI query, CapabilityToken token, WorkstreamId ws, string question, int limit, CancellationToken ct)
     {
         var queries = _planner is null ? new[] { question } : (await _planner.PlanAsync(question, ct).ConfigureAwait(false)).ToArray();
+        // When entity-boosting, pull a wider candidate pool so entity-scoped facts
+        // that a plain semantic/BM25 fusion ranked below the cut can be floated up.
+        var poolLimit = _entityBoost ? Math.Min(limit * 4, 120) : limit;
+        var entities = _entityBoost ? ExtractQueryEntities(question) : Array.Empty<string>();
         var best = new Dictionary<string, (double Score, string Text)>();
         foreach (var q in queries)
         {
-            var res = await query.QueryAsync(new QueryRequest(new QuerySpec(ws, FreeText: q, Limit: limit)), token, ct).ConfigureAwait(false);
+            var res = await query.QueryAsync(new QueryRequest(new QuerySpec(ws, FreeText: q, Limit: poolLimit)), token, ct).ConfigureAwait(false);
             foreach (var item in res.Items)
             {
                 var dated = $"[{item.ValidAt:yyyy-MM-dd}] {item.Summary}";
-                if (!best.TryGetValue(item.EventId.Value, out var cur) || item.Score > cur.Score)
-                    best[item.EventId.Value] = (item.Score, dated);
+                // Entity-anchored boost: a fact that mentions an entity named in the
+                // question is scoped to the asked-about person, so it should outrank
+                // distractor facts about other people (the adversarial failure mode).
+                var boost = 0.0;
+                if (entities.Length > 0)
+                {
+                    var hits = entities.Count(e => item.Summary.Contains(e, StringComparison.OrdinalIgnoreCase));
+                    if (hits > 0) boost = 1.0 + 0.1 * hits;
+                }
+                var score = item.Score + boost;
+                if (!best.TryGetValue(item.EventId.Value, out var cur) || score > cur.Score)
+                    best[item.EventId.Value] = (score, dated);
             }
         }
         return best.Values.OrderByDescending(v => v.Score).Take(limit).Select(v => v.Text).ToArray();
     }
+
+    // Proper-noun entities named in the question (person/place names). LoCoMo
+    // questions are person-centric ("What does Melanie's necklace symbolize?"),
+    // so capitalized non-leading tokens outside a question-word stoplist are a
+    // high-precision signal for the entity the answer must be attributed to.
+    private static readonly HashSet<string> QueryStop = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "What","When","Where","Which","Who","Whom","Whose","Why","How","Did","Do","Does",
+        "Is","Are","Was","Were","Has","Have","Had","The","A","An","In","On","At","Of","To",
+        "For","And","Or","But","If","As","By","With","From","This","That","These","Those","I",
+    };
+
+    private static string[] ExtractQueryEntities(string question) =>
+        System.Text.RegularExpressions.Regex.Matches(question, @"\b[A-Z][a-zA-Z]+\b")
+            .Select(m => m.Value)
+            .Where(w => !QueryStop.Contains(w))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
 
     private bool IsSelected(LoCoMoSample sample, int qi) =>
         _categories is null || _categories.Contains(sample.Questions[qi].CategoryLabel);

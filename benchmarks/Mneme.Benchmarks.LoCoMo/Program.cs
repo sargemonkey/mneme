@@ -110,7 +110,7 @@ internal static class Program
             Console.Error.WriteLine("--fresh: cleared any prior results, starting over.");
         }
 
-        var evaluator = new LoCoMoEvaluator(dataRoot, embedder, answerer, judge, distiller, reranker, planner, ingestMode, topK, concurrency, recallRetry, categories, args.Contains("--reuse-db"));
+        var evaluator = new LoCoMoEvaluator(dataRoot, embedder, answerer, judge, distiller, reranker, planner, ingestMode, topK, concurrency, recallRetry, categories, args.Contains("--reuse-db"), args.Contains("--entity-boost"));
 
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
