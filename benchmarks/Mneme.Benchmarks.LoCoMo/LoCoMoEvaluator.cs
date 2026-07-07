@@ -40,15 +40,17 @@ public sealed class LoCoMoEvaluator
     private readonly IReadOnlySet<string>? _categories;
     private readonly bool _reuseDb;
     private readonly bool _entityBoost;
+    private readonly TripleExtractor? _tripleExtractor;
 
     public LoCoMoEvaluator(string dataRoot, IEmbeddingProvider embedder, IAnswerer answerer, IJudge judge,
         ISessionDistiller? distiller, IReranker? reranker, QueryPlanner? planner, IngestMode mode, int topK,
         int concurrency = 1, bool recallRetry = false, IReadOnlySet<string>? categories = null, bool reuseDb = false,
-        bool entityBoost = false)
+        bool entityBoost = false, TripleExtractor? tripleExtractor = null)
     {
         _categories = categories is { Count: > 0 } ? categories : null;
         _reuseDb = reuseDb;
         _entityBoost = entityBoost;
+        _tripleExtractor = tripleExtractor;
         _dataRoot = dataRoot;
         _embedder = embedder;
         _answerer = answerer;
@@ -139,6 +141,21 @@ public sealed class LoCoMoEvaluator
                 await vectors.BackfillAsync(ws, ct).ConfigureAwait(false);
             }
 
+            // Knowledge-graph mode: extract subject-attributed triples from the raw
+            // turns (once; cached in the DB's sidecar fact_triples table so
+            // --reuse-db pays the cost only on the first pass).
+            TripleStore? triples = null;
+            if (_tripleExtractor is not null)
+            {
+                triples = new TripleStore(Path.Combine(_dataRoot, sample.SampleId + ".db"));
+                triples.EnsureSchema();
+                if (triples.Count() == 0)
+                {
+                    await ExtractTriplesAsync(triples, sample, ct).ConfigureAwait(false);
+                }
+                Console.Error.WriteLine($"    triples available: {triples.Count()}");
+            }
+
             // Answer + judge each pending question, up to _concurrency in flight.
             // Ingest/embed above is sequential; only the LLM-heavy read+answer+
             // judge phase is parallelized (GitHub Models allows 20k req/min, so
@@ -164,7 +181,7 @@ public sealed class LoCoMoEvaluator
                     QaRecord record;
                     try
                     {
-                        var context = await RetrieveContextAsync(query, token, ws, qa.Question, _topK, ct).ConfigureAwait(false);
+                        var context = await RetrieveContextAsync(query, token, ws, qa.Question, _topK, triples, ct).ConfigureAwait(false);
                         var predicted = await _answerer.AnswerAsync(qa.Question, context, ct).ConfigureAwait(false);
 
                         // Recall-retry: a buried single fact (adversarial) often
@@ -172,7 +189,7 @@ public sealed class LoCoMoEvaluator
                         // wider net (3× depth) and answer once more before giving up.
                         if (_recallRetry && IsAbstention(predicted))
                         {
-                            var wider = await RetrieveContextAsync(query, token, ws, qa.Question, _topK * 3, ct).ConfigureAwait(false);
+                            var wider = await RetrieveContextAsync(query, token, ws, qa.Question, _topK * 3, triples, ct).ConfigureAwait(false);
                             var retry = await _answerer.AnswerAsync(qa.Question, wider, ct).ConfigureAwait(false);
                             if (!IsAbstention(retry)) { predicted = retry; context = wider; }
                         }
@@ -214,7 +231,8 @@ public sealed class LoCoMoEvaluator
     // Each snippet is prefixed with the event's valid-at date so the answer
     // model has the temporal anchor it needs for date-difference questions.
     private async Task<IReadOnlyList<string>> RetrieveContextAsync(
-        IMemoryQueryAPI query, CapabilityToken token, WorkstreamId ws, string question, int limit, CancellationToken ct)
+        IMemoryQueryAPI query, CapabilityToken token, WorkstreamId ws, string question, int limit,
+        TripleStore? triples, CancellationToken ct)
     {
         var queries = _planner is null ? new[] { question } : (await _planner.PlanAsync(question, ct).ConfigureAwait(false)).ToArray();
         // When entity-boosting, pull a wider candidate pool so entity-scoped facts
@@ -242,7 +260,30 @@ public sealed class LoCoMoEvaluator
                     best[item.EventId.Value] = (score, dated);
             }
         }
-        return best.Values.OrderByDescending(v => v.Score).Take(limit).Select(v => v.Text).ToArray();
+        var semantic = best.Values.OrderByDescending(v => v.Score).Take(limit).Select(v => v.Text);
+
+        // Knowledge-graph mode: prepend subject-scoped triples for the entities the
+        // question names. These are structurally attributed to the asked-about
+        // person, so they front-load the answer with the right sub-graph and push
+        // distractor facts out of the visible window.
+        if (triples is not null)
+        {
+            var subjects = ExtractQueryEntities(question)
+                .Select(TripleExtractor.NormalizeSubject)
+                .Where(s => s.Length > 0).ToArray();
+            var scoped = triples.SubjectScoped(subjects, Math.Max(6, limit / 3));
+            if (scoped.Count > 0)
+            {
+                // Supplement (don't replace): keep the full-text semantic snippets
+                // as primary evidence and APPEND the subject-scoped triples as an
+                // attribution hint. Terse triples alone lose detail (objects get
+                // abstracted), so they help only alongside the full facts.
+                var sem = semantic.ToList();
+                var extra = scoped.Where(s => !sem.Contains(s));
+                return sem.Concat(extra).ToArray();
+            }
+        }
+        return semantic.ToArray();
     }
 
     // Proper-noun entities named in the question (person/place names). LoCoMo
@@ -297,6 +338,25 @@ public sealed class LoCoMoEvaluator
         answer.Contains("not enough", StringComparison.OrdinalIgnoreCase) ||
         answer.Contains("no information", StringComparison.OrdinalIgnoreCase) ||
         answer.StartsWith("[error]", StringComparison.OrdinalIgnoreCase);
+
+    // Extract subject-attributed triples from the conversation's raw turns and
+    // persist them to the sidecar store. Chunked like distillation so each LLM
+    // call sees a coherent window; runs once per conversation (cached in the DB).
+    private async Task ExtractTriplesAsync(TripleStore store, LoCoMoSample sample, CancellationToken ct)
+    {
+        var turns = sample.Turns.Select((t, i) =>
+            ($"e{i:D5}", t.At, $"{t.Speaker}: {t.Text}")).ToList();
+        var total = 0;
+        for (var i = 0; i < turns.Count; i += DistillChunk)
+        {
+            ct.ThrowIfCancellationRequested();
+            var chunk = turns.Skip(i).Take(DistillChunk).ToList();
+            var rows = await _tripleExtractor!.ExtractAsync(chunk, ct).ConfigureAwait(false);
+            store.Insert(rows);
+            total += rows.Count;
+        }
+        Console.Error.WriteLine($"    extracted {total} triples for {sample.SampleId}");
+    }
 
     // Chunk the conversation and run Mneme's session distiller over each window,
     // turning raw turns into atomic Fact events (with session-range citations).

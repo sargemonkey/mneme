@@ -110,7 +110,9 @@ internal static class Program
             Console.Error.WriteLine("--fresh: cleared any prior results, starting over.");
         }
 
-        var evaluator = new LoCoMoEvaluator(dataRoot, embedder, answerer, judge, distiller, reranker, planner, ingestMode, topK, concurrency, recallRetry, categories, args.Contains("--reuse-db"), args.Contains("--entity-boost"));
+        var kgExtractor = args.Contains("--kg") && answerer is IChatCompletion kgChat
+            ? new TripleExtractor(kgChat) : null;
+        var evaluator = new LoCoMoEvaluator(dataRoot, embedder, answerer, judge, distiller, reranker, planner, ingestMode, topK, concurrency, recallRetry, categories, args.Contains("--reuse-db"), args.Contains("--entity-boost"), kgExtractor);
 
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };

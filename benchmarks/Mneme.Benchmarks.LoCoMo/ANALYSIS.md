@@ -391,3 +391,33 @@ Mneme's current strengths are orthogonal and real: temporal (64–90%), single-h
 vs. an SVO-triple graph — a deliberate, scoped build, not a quick lever. Recommend
 promoting subject-attributed fact extraction to the backlog rather than chasing
 benchmark-local hacks.
+
+### Experiment 5 — subject-attributed knowledge triples (prototype). **Positive (additive), negative (replacement).**
+
+Extracted `(subject, predicate, object)` triples from raw turns via the chat model
+(296 for conv-26 vs 247 statement-facts — finer granularity), cached in a sidecar
+`fact_triples` table. Subject = normalized name/possessive-chain (poor-man's entity
+resolution). Retrieval scopes triples to the entities named in the question.
+
+| Config | multi-hop | adversarial | overall |
+|---|---:|---:|---:|
+| baseline (statement facts only) | 62.2% | 17.0% | 34.9% |
+| KG triples **replace** half the window | 55.4% | 15.2% | 31.2% |
+| KG triples **supplement** full facts | 60.8% | **19.6%** | **36.0%** |
+
+**Replacement lost** (−3.7pp): terse triples abstract the object — "What subject have
+both painted? → *Sunsets*" became triple object "nature"; the compressed form strips
+detail the answer step needs.
+
+**Supplement won** (+1.1pp overall, **+2.6pp adversarial** — the first positive
+adversarial lever in the arc). vs baseline: 9 gains / 5 regressions (net +4), and
+**6 of 9 gains are adversarial** attribution wins ("Who is Caroline a fan of? → Ed
+Sheeran", "Which song motivates Melanie? → Brave"). Subject-scoped attribution,
+appended alongside the full facts, front-loads the right person's sub-graph without
+losing detail.
+
+**Production design (validated):** keep full-text facts; attach a resolved
+`subject_entity_id` (via Phase-6 EntityResolver, not string-match); retrieve by
+subject-scoped *filtering/boosting over full facts*, surfacing triples as an
+attribution supplement. Do **not** replace facts with terse triples. This is the
+`svo-facts` / `kg-*` backlog build.
