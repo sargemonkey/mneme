@@ -46,9 +46,16 @@ public sealed record EvidencePayload(
 /// <summary>A synthesized atomic claim derived from evidence.</summary>
 /// <param name="Statement">The fact as a single declarative sentence.</param>
 /// <param name="SupportingEvents">Events that support this fact. May be empty when ingested directly.</param>
+/// <param name="Triples">
+/// Optional structured, subject-attributed assertions extracted from the same
+/// statement. Enables subject-scoped retrieval (facts <em>about</em> an entity,
+/// not merely mentioning it) without discarding the full-text statement. Null or
+/// empty when the distiller did not emit structured attribution.
+/// </param>
 public sealed record FactPayload(
     string Statement,
-    IReadOnlyList<EventId> SupportingEvents)
+    IReadOnlyList<EventId> SupportingEvents,
+    IReadOnlyList<FactTriple>? Triples = null)
     : EventPayload
 {
     /// <inheritdoc/>

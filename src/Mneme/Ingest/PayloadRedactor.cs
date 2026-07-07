@@ -32,7 +32,22 @@ internal static class PayloadRedactor
             case FactPayload f:
             {
                 var r = redactor.Redact(f.Statement);
-                return (f with { Statement = r.RedactedContent }, r.HadHits, r.Hits.Count);
+                var triples = f.Triples;
+                var tripleHits = 0;
+                if (f.Triples is { Count: > 0 })
+                {
+                    var redacted = new List<FactTriple>(f.Triples.Count);
+                    foreach (var t in f.Triples)
+                    {
+                        var rs = redactor.Redact(t.Subject);
+                        var ro = redactor.Redact(t.Object);
+                        tripleHits += rs.Hits.Count + ro.Hits.Count;
+                        redacted.Add(t with { Subject = rs.RedactedContent, Object = ro.RedactedContent });
+                    }
+                    triples = redacted;
+                }
+                return (f with { Statement = r.RedactedContent, Triples = triples },
+                        r.HadHits || tripleHits > 0, r.Hits.Count + tripleHits);
             }
             case DecisionPayload d:
             {

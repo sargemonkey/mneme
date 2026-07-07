@@ -20,6 +20,45 @@ public sealed class EventPayloadTests
     }
 
     [Fact]
+    public void FactPayload_TriplesDefaultNull_AndAreSettable()
+    {
+        var bare = new FactPayload("Melanie lives in Sweden", Array.Empty<EventId>());
+        Assert.Null(bare.Triples);
+
+        var triple = new FactTriple("Melanie", "lives_in", "Sweden");
+        var withTriples = bare with { Triples = new[] { triple } };
+        Assert.NotNull(withTriples.Triples);
+        Assert.Single(withTriples.Triples!);
+        Assert.Equal("Melanie", withTriples.Triples![0].Subject);
+        Assert.Equal("lives_in", withTriples.Triples[0].Predicate);
+        Assert.Equal("Sweden", withTriples.Triples[0].Object);
+    }
+
+    [Fact]
+    public void FactPayload_WithTriples_RoundTripsThroughJson()
+    {
+        var p = new FactPayload("Melanie's grandma is from Sweden", Array.Empty<EventId>(),
+            new[] { new FactTriple("Melanie's grandma", "nationality", "Swedish") });
+        var json = JsonSerializer.Serialize<EventPayload>(p, Fixtures.JsonOptions);
+        var back = Assert.IsType<FactPayload>(JsonSerializer.Deserialize<EventPayload>(json, Fixtures.JsonOptions));
+        Assert.NotNull(back.Triples);
+        Assert.Equal("Melanie's grandma", back.Triples![0].Subject);
+        Assert.Equal("nationality", back.Triples[0].Predicate);
+        Assert.Equal("Swedish", back.Triples[0].Object);
+    }
+
+    [Fact]
+    public void FactPayload_LegacyJsonWithoutTriples_DeserializesToNull()
+    {
+        // A payload serialized before Triples existed must still load (append-only
+        // log is permanent; old FactPayload rows have no triples field).
+        const string legacy = """{"$type":"FactPayload","statement":"old fact","supportingEvents":[]}""";
+        var back = Assert.IsType<FactPayload>(JsonSerializer.Deserialize<EventPayload>(legacy, Fixtures.JsonOptions));
+        Assert.Equal("old fact", back.Statement);
+        Assert.Null(back.Triples);
+    }
+
+    [Fact]
     public void DecisionPayload_CategoryIsDecision()
     {
         var p = new DecisionPayload("ship it", "we tested", Array.Empty<EventId>(), new PrincipalId("u"));
