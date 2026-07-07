@@ -37,6 +37,7 @@ public sealed class ProjectorPipeline
     public static IReadOnlyList<IProjector> DefaultProjectors { get; } = new IProjector[]
     {
         new FactsProjector(),
+        new FactTriplesProjector(),
         new DecisionsProjector(),
         new GoalsProjector(),
         new HypothesesProjector(),

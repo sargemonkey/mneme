@@ -27,7 +27,7 @@ namespace Mneme.Storage;
 public static class SqliteSchema
 {
     /// <summary>Current schema version. Bumped when the DDL changes incompatibly.</summary>
-    public const int Version = 9;
+    public const int Version = 10;
 
     /// <summary>
     /// Idempotently create all Phase 1 tables, indexes, and the
@@ -473,5 +473,32 @@ public static class SqliteSchema
         ) WITHOUT ROWID;
         CREATE INDEX IF NOT EXISTS idx_event_embeddings_ws
             ON event_embeddings(workstream_id, provider_id);
+
+        -- Phase 12 — subject-attributed fact triples. Projected from
+        -- FactPayload.Triples so retrieval can scope to facts ABOUT an
+        -- entity (subject_entity_id, resolved via the entity resolver)
+        -- rather than facts whose text merely mentions it. Derived +
+        -- rebuildable from memory_events; the full statement stays in
+        -- projection_facts (triples are an attribution index, not a
+        -- replacement). subject_entity_id is nullable — an unresolved
+        -- subject still indexes on its normalized surface key.
+        CREATE TABLE IF NOT EXISTS projection_fact_triples (
+            workstream_id     TEXT NOT NULL,
+            event_id          TEXT NOT NULL,
+            ordinal           INTEGER NOT NULL,
+            subject_text      TEXT NOT NULL,
+            subject_key       TEXT NOT NULL,
+            subject_entity_id TEXT,
+            predicate         TEXT NOT NULL,
+            object            TEXT NOT NULL,
+            valid_at          TEXT NOT NULL,
+            revoked_at        TEXT,
+            PRIMARY KEY (workstream_id, event_id, ordinal),
+            FOREIGN KEY (event_id) REFERENCES memory_events(event_id)
+        ) WITHOUT ROWID;
+        CREATE INDEX IF NOT EXISTS idx_fact_triples_subject_key
+            ON projection_fact_triples(workstream_id, subject_key);
+        CREATE INDEX IF NOT EXISTS idx_fact_triples_subject_entity
+            ON projection_fact_triples(workstream_id, subject_entity_id);
         """;
 }
