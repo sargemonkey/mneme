@@ -52,6 +52,7 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
     private readonly IDistiller? _distiller;
     private readonly VectorIndex? _vectors;
     private readonly IReranker? _reranker;
+    private readonly bool _subjectBoost;
     private readonly Mneme.Distillation.DistillationRequestBuilder _requestBuilder;
     private readonly Mneme.Distillation.DistillationCache _cache;
 
@@ -73,6 +74,10 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
 
     /// <summary>Construct with everything including an optional <see cref="IReranker"/>.</summary>
     public MemoryQueryApi(SqliteConnectionFactory connections, TextSearchService search, TimeProvider clock, IDistiller? distiller, VectorIndex? vectors, IReranker? reranker)
+        : this(connections, search, clock, distiller, vectors, reranker, subjectBoost: true) { }
+
+    /// <summary>Construct with everything, controlling the subject-attribution boost.</summary>
+    public MemoryQueryApi(SqliteConnectionFactory connections, TextSearchService search, TimeProvider clock, IDistiller? distiller, VectorIndex? vectors, IReranker? reranker, bool subjectBoost)
     {
         ArgumentNullException.ThrowIfNull(connections);
         ArgumentNullException.ThrowIfNull(search);
@@ -83,6 +88,7 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
         _distiller = distiller;
         _vectors = vectors;
         _reranker = reranker;
+        _subjectBoost = subjectBoost;
         _requestBuilder = new Mneme.Distillation.DistillationRequestBuilder(connections);
         _cache = new Mneme.Distillation.DistillationCache(connections);
     }
@@ -462,7 +468,7 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
         // a prolific entity's facts can't flood a small result window — mirroring
         // the validated "supplement, don't replace" benchmark result.
         var subjectKeys = SubjectKey.ExtractSubjects(spec.FreeText);
-        var subjectEvents = LoadSubjectScopedEvents(workstream, subjectKeys);
+        var subjectEvents = _subjectBoost ? LoadSubjectScopedEvents(workstream, subjectKeys) : new HashSet<string>(StringComparer.Ordinal);
         var subjectInjectCap = Math.Max(6, limit / 3);
         var subjectOnly = subjectEvents.Where(id => !semMap.ContainsKey(id) && !lexMap.ContainsKey(id));
         var admittedSubjectOnly = new HashSet<string>(subjectOnly.Take(subjectInjectCap), StringComparer.Ordinal);

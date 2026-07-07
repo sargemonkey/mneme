@@ -32,8 +32,14 @@ public sealed class LlmSessionDistiller : ISessionDistiller
         - Preserve dates/times mentioned in or around the turns.
         - Attribute to the speaker by name.
         - Skip pure pleasantries that carry no durable information.
+        - For each fact, also emit structured triples: the SPECIFIC entity the
+          fact is about (a name or possessive chain like "Melanie" or "Melanie's
+          grandma" — never a pronoun), a short snake_case predicate, and the
+          object. Attribute each triple to the RIGHT entity; do not borrow a fact
+          about one person and attribute it to another.
         Reply with JSON only:
-        {"facts":[{"statement":"...","supporting":["<entryId>"]}]}
+        {"facts":[{"statement":"...","supporting":["<entryId>"],
+                   "triples":[{"subject":"...","predicate":"...","object":"..."}]}]}
         where supporting lists the entry id(s) the fact came from.
         """;
 
@@ -65,8 +71,26 @@ public sealed class LlmSessionDistiller : ISessionDistiller
                     {
                         supporting = new[] { req.Entries[0].EntryId };
                     }
+
+                    IReadOnlyList<FactTriple>? triples = null;
+                    if (f.TryGetProperty("triples", out var tr) && tr.ValueKind == JsonValueKind.Array)
+                    {
+                        var list = new List<FactTriple>();
+                        foreach (var t in tr.EnumerateArray())
+                        {
+                            var subj = t.TryGetProperty("subject", out var sv) ? sv.GetString() ?? "" : "";
+                            var pred = t.TryGetProperty("predicate", out var pv) ? pv.GetString() ?? "" : "";
+                            var obj = t.TryGetProperty("object", out var ov) ? ov.GetString() ?? "" : "";
+                            if (subj.Length > 0 && pred.Length > 0 && obj.Length > 0)
+                            {
+                                list.Add(new FactTriple(subj, pred, obj));
+                            }
+                        }
+                        if (list.Count > 0) triples = list;
+                    }
+
                     events.Add(new DistilledEvent(
-                        new FactPayload(statement, Array.Empty<EventId>()), supporting));
+                        new FactPayload(statement, Array.Empty<EventId>(), triples), supporting));
                 }
             }
         }

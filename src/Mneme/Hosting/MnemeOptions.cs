@@ -38,6 +38,19 @@ public sealed class MnemeOptions
     public bool IncludeTechnical { get; set; }
 
     /// <summary>
+    /// Whether hybrid retrieval boosts events whose fact-triple subject matches
+    /// an entity named in the query (subject-scoped attribution). Default
+    /// <c>false</c>: a controlled LoCoMo A/B (see benchmarks ANALYSIS.md
+    /// "Experiment 6") showed the retrieval-side boost <em>regresses</em>
+    /// (it reorders/displaces facts like the losing "replacement" prototype).
+    /// The validated win came from <em>appending</em> triples as supplementary
+    /// answer context, which is a host/distillation concern, not retrieval
+    /// reweighting. The lever and the projection_fact_triples index are kept for
+    /// that future approach; enable only if you have measured a gain on your data.
+    /// </summary>
+    public bool SubjectAttributionBoost { get; set; }
+
+    /// <summary>
     /// Validity window for the auto-built capability token. Default:
     /// now → now + 30 days.
     /// </summary>

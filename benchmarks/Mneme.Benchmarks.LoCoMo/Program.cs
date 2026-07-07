@@ -112,7 +112,7 @@ internal static class Program
 
         var kgExtractor = args.Contains("--kg") && answerer is IChatCompletion kgChat
             ? new TripleExtractor(kgChat) : null;
-        var evaluator = new LoCoMoEvaluator(dataRoot, embedder, answerer, judge, distiller, reranker, planner, ingestMode, topK, concurrency, recallRetry, categories, args.Contains("--reuse-db"), args.Contains("--entity-boost"), kgExtractor);
+        var evaluator = new LoCoMoEvaluator(dataRoot, embedder, answerer, judge, distiller, reranker, planner, ingestMode, topK, concurrency, recallRetry, categories, args.Contains("--reuse-db"), args.Contains("--entity-boost"), kgExtractor, !args.Contains("--no-subject-boost"));
 
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };

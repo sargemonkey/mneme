@@ -28,6 +28,7 @@ public sealed class SubjectScopedQueryTests : IDisposable
             o.WorkstreamId = ws;
             o.SqlitePath = Path.Combine(_tmpDir, ws + ".db");
             o.UserId = "alice";
+            o.SubjectAttributionBoost = true; // exercising the boost mechanism explicitly
         });
         services.AddSingleton<IEmbeddingProvider>(new BagOfWordsEmbedder());
         return services.BuildServiceProvider();

@@ -41,16 +41,18 @@ public sealed class LoCoMoEvaluator
     private readonly bool _reuseDb;
     private readonly bool _entityBoost;
     private readonly TripleExtractor? _tripleExtractor;
+    private readonly bool _subjectBoost;
 
     public LoCoMoEvaluator(string dataRoot, IEmbeddingProvider embedder, IAnswerer answerer, IJudge judge,
         ISessionDistiller? distiller, IReranker? reranker, QueryPlanner? planner, IngestMode mode, int topK,
         int concurrency = 1, bool recallRetry = false, IReadOnlySet<string>? categories = null, bool reuseDb = false,
-        bool entityBoost = false, TripleExtractor? tripleExtractor = null)
+        bool entityBoost = false, TripleExtractor? tripleExtractor = null, bool subjectBoost = true)
     {
         _categories = categories is { Count: > 0 } ? categories : null;
         _reuseDb = reuseDb;
         _entityBoost = entityBoost;
         _tripleExtractor = tripleExtractor;
+        _subjectBoost = subjectBoost;
         _dataRoot = dataRoot;
         _embedder = embedder;
         _answerer = answerer;
@@ -390,6 +392,7 @@ public sealed class LoCoMoEvaluator
             o.WorkstreamId = sampleId;
             o.SqlitePath = dbPath;
             o.UserId = "locomo";
+            o.SubjectAttributionBoost = _subjectBoost;
         });
         services.AddSingleton(_embedder);
         if (_distiller is not null) services.AddSingleton(_distiller);

@@ -421,3 +421,37 @@ losing detail.
 subject-scoped *filtering/boosting over full facts*, surfacing triples as an
 attribution supplement. Do **not** replace facts with terse triples. This is the
 `svo-facts` / `kg-*` backlog build.
+
+### Experiment 6 — production knowledge-graph path (shipped code). **Retrieval-side boost regresses; default OFF.**
+
+Wired the full production path in Mneme proper: FactTriple contract →
+projection_fact_triples (schema v10) → FactTriplesProjector → subject-scoped
+boost in MemoryQueryApi. The benchmark distiller now emits FactPayload.Triples,
+so the shipped retrieval path (not the --kg sidecar) engages.
+
+Fresh distillation (196 facts + 242 triples/conv), then A/B the subject-boost on
+**identical** re-used DBs (only the boost toggles):
+
+| Config (identical fresh triple-DBs) | multi-hop | adversarial | overall |
+|---|---:|---:|---:|
+| original cached distill, no boost (Exp 1 baseline) | 62.2% | 17.0% | 34.9% |
+| triple-emitting distill, boost **OFF** | 52.7% | 19.6% | 32.8% |
+| triple-emitting distill, boost **ON** | 55.4% | 11.6% | **29.0%** |
+
+Two honest negatives:
+1. **The triple-emitting distiller prompt cost ~2pp** (34.9→32.8): asking the
+   distiller to emit statements AND triples in one pass slightly degraded the
+   statement quality that the answer step depends on.
+2. **The retrieval-side subject-boost regressed a further ~3.8pp** (32.8→29.0),
+   adversarial 19.6→11.6. It reorders/injects facts by subject — the same
+   *displacement* that made the "replacement" prototype (Exp 5) lose. The
+   validated **win** in Exp 5 came from *appending* terse triples as
+   supplementary answer context WITHOUT displacing the full facts — an
+   answer-context/distillation concern, not retrieval reweighting.
+
+**Decision:** ship the KG data infrastructure (contract, projection, projector,
+toggle) — it is correct and tested — but default `SubjectAttributionBoost = OFF`.
+Do not enable a lever that regresses in a controlled test. The path to the win is
+answer-context supplementation (append subject-scoped triples alongside full
+facts), and ideally a **separate** triple-extraction pass so fact-statement
+quality is not diluted. Left as the next scoped step; the projection is ready for it.
