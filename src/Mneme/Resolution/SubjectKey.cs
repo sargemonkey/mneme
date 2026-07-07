@@ -27,6 +27,36 @@ public static partial class SubjectKey
         return s.Trim();
     }
 
+    /// <summary>
+    /// Extract normalized subject keys from a free-text query. LoCoMo-style
+    /// questions are person-centric ("What does Melanie's necklace symbolize?"),
+    /// so capitalized tokens outside a question-word stoplist are a high-precision
+    /// signal for the entity the answer should be attributed to. Returns the
+    /// distinct normalized keys (possessive-stripped, lowercased).
+    /// </summary>
+    public static IReadOnlyList<string> ExtractSubjects(string? freeText)
+    {
+        if (string.IsNullOrWhiteSpace(freeText)) return Array.Empty<string>();
+        var keys = new List<string>();
+        foreach (Match m in ProperNounRegex().Matches(freeText))
+        {
+            if (QueryStop.Contains(m.Value)) continue;
+            var k = Normalize(m.Value);
+            if (k.Length > 0 && !keys.Contains(k)) keys.Add(k);
+        }
+        return keys;
+    }
+
+    private static readonly HashSet<string> QueryStop = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "What","When","Where","Which","Who","Whom","Whose","Why","How","Did","Do","Does",
+        "Is","Are","Was","Were","Has","Have","Had","The","A","An","In","On","At","Of","To",
+        "For","And","Or","But","If","As","By","With","From","This","That","These","Those","I",
+    };
+
+    [GeneratedRegex(@"\b[A-Z][a-zA-Z]+\b")]
+    private static partial Regex ProperNounRegex();
+
     [GeneratedRegex(@"['’]s\b")]
     private static partial Regex PossessiveRegex();
 

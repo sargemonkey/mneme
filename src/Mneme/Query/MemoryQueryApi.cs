@@ -4,6 +4,7 @@ using Microsoft.Data.Sqlite;
 using Mneme.Contracts;
 using Mneme.Ingest.Validation;
 using Mneme.Observability;
+using Mneme.Resolution;
 using Mneme.Search;
 using Mneme.Storage;
 
@@ -442,6 +443,7 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
     {
         const double wSemantic = 0.65;
         const double wBm25 = 0.35;
+        const double wSubject = 0.20; // additive boost for subject-attributed matches
         var workstream = spec.Workstream!.Value;
         var pool = Math.Min(200, Math.Max(limit * 8, 64));
 
@@ -451,16 +453,31 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
         var semMap = semantic.ToDictionary(h => h.EventId.Value, h => h);
         var lexMap = lexical.ToDictionary(h => h.EventId.Value, h => h);
 
-        var fused = new List<(string EventId, double Semantic, double Bm25, double Fused, double Recency, double Final)>();
-        foreach (var id in semMap.Keys.Union(lexMap.Keys))
+        // Subject-scoped attribution: events carrying a fact triple whose subject
+        // matches an entity named in the query. These are structurally ABOUT the
+        // asked-about person, so they get an additive boost that floats the right
+        // sub-graph above distractor facts that merely mention the same names.
+        // Events already retrieved semantically/lexically are always boosted;
+        // subject-ONLY events (no semantic/lexical hit) are injected but capped so
+        // a prolific entity's facts can't flood a small result window — mirroring
+        // the validated "supplement, don't replace" benchmark result.
+        var subjectKeys = SubjectKey.ExtractSubjects(spec.FreeText);
+        var subjectEvents = LoadSubjectScopedEvents(workstream, subjectKeys);
+        var subjectInjectCap = Math.Max(6, limit / 3);
+        var subjectOnly = subjectEvents.Where(id => !semMap.ContainsKey(id) && !lexMap.ContainsKey(id));
+        var admittedSubjectOnly = new HashSet<string>(subjectOnly.Take(subjectInjectCap), StringComparer.Ordinal);
+
+        var fused = new List<(string EventId, double Semantic, double Bm25, double SubjectBoost, double Fused, double Recency, double Final)>();
+        foreach (var id in semMap.Keys.Union(lexMap.Keys).Union(admittedSubjectOnly))
         {
             var sem = semMap.TryGetValue(id, out var sh) ? sh.Semantic : 0.0;
             var bm25 = lexMap.TryGetValue(id, out var lh) ? lh.NormalizedBm25 : 0.0;
             var recency = semMap.TryGetValue(id, out var s2) ? s2.RecencyWeight
                         : lexMap.TryGetValue(id, out var l2) ? l2.RecencyWeight
                         : 1.0;
-            var fusedScore = (wSemantic * sem) + (wBm25 * bm25);
-            fused.Add((id, sem, bm25, fusedScore, recency, fusedScore * recency));
+            var subjectBoost = subjectEvents.Contains(id) ? wSubject : 0.0;
+            var fusedScore = (wSemantic * sem) + (wBm25 * bm25) + subjectBoost;
+            fused.Add((id, sem, bm25, subjectBoost, fusedScore, recency, fusedScore * recency));
         }
         fused.Sort(static (a, b) => b.Final.CompareTo(a.Final));
 
@@ -508,7 +525,7 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
                 ? new ScoreDetails(
                     Semantic: cand.Semantic,
                     Bm25: cand.Bm25,
-                    EntityBoost: 0.0,
+                    EntityBoost: cand.SubjectBoost,
                     CurationMultiplier: curationMult,
                     Fused: cand.Fused,
                     Final: cand.Final * curationMult,
@@ -526,6 +543,34 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
                 Details: details));
         }
         return (items, items.Count, "hybrid-semantic-bm25", fused.Count, gated);
+    }
+
+    // Event ids in the workstream that carry a non-revoked fact triple whose
+    // subject matches any of the query subject keys. Matching is bidirectional
+    // substring ("melanie" matches subject "melanie grandma" and vice versa) so
+    // a possessive-chain question still reaches the base entity's facts. The
+    // triple table is per-workstream and small; a LIKE scan is fine at our scale.
+    private HashSet<string> LoadSubjectScopedEvents(WorkstreamId workstream, IReadOnlyList<string> subjectKeys)
+    {
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        if (subjectKeys.Count == 0) return ids;
+
+        using var c = _connections.Open();
+        foreach (var key in subjectKeys)
+        {
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = """
+                SELECT DISTINCT event_id FROM projection_fact_triples
+                WHERE workstream_id = $ws
+                  AND revoked_at IS NULL
+                  AND (subject_key LIKE '%' || $k || '%' OR $k LIKE '%' || subject_key || '%');
+                """;
+            cmd.Parameters.AddWithValue("$ws", workstream.Value);
+            cmd.Parameters.AddWithValue("$k", key);
+            using var rd = cmd.ExecuteReader();
+            while (rd.Read()) ids.Add(rd.GetString(0));
+        }
+        return ids;
     }
 
     // Two-stage reranking: hand the retrieved candidate pool to the host
