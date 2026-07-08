@@ -24,3 +24,16 @@ from graphiti_core/prompts/* (Apache 2.0, Copyright Zep AI):
 Each such file includes an "// Adapted from: getzep/graphiti, Apache 2.0"
 header on first use. No upstream code is bundled verbatim; only prompt
 template strings, with attribution.
+
+---
+
+The LoCoMo benchmark judge in
+benchmarks/Mneme.Benchmarks.LoCoMo/Clients.cs (MemAlignedJudge) re-expresses
+the LoCoMo J-score grading methodology (partial credit, paraphrase tolerance,
+date/duration tolerance, semantic-overlap / same-referent leniency) used by
+Mem0's public benchmark suite (https://github.com/mem0ai/memory-benchmarks,
+Apache 2.0) so Mneme's LoCoMo numbers are comparable to Mem0's published
+figures. No upstream prompt text is copied verbatim; the rules are
+re-implemented in Mneme's own wording. The harness also mirrors Mem0's scoring
+scope by reporting a "Mem0-comparable" subtotal over LoCoMo categories 1–4
+(adversarial / category 5 excluded, matching their CATEGORIES_TO_EVALUATE).

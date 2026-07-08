@@ -70,12 +70,14 @@ internal static class Program
 
         var (embedder, answerer, judge, distiller, mode) = BuildClients(args);
 
-        // Optional judge override: f1 = token-F1 only (no LLM); hybrid = F1 OR LLM.
+        // Optional judge override: f1 = token-F1 only (no LLM); hybrid = F1 OR LLM;
+        // mem0 = LoCoMo J-score-aligned lenient LLM judge (apples-to-apples w/ Mem0).
         var judgeArg = (GetArg(args, "--judge") ?? "llm").Trim().ToLowerInvariant();
         judge = judgeArg switch
         {
             "f1" => new OfflineJudge(),
             "hybrid" => new HybridJudge(judge),
+            "mem0" => answerer is IChatCompletion mjChat ? new MemAlignedJudge(mjChat) : judge,
             _ => judge,
         };
 

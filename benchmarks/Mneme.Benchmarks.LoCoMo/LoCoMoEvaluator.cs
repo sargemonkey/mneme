@@ -451,6 +451,14 @@ public sealed record LoCoMoReport(
     string DistillerId,
     string RerankerId)
 {
+    // Mem0's LoCoMo benchmark scores categories 1–4 only and EXCLUDES adversarial
+    // (category 5) — see mem0ai/memory-benchmarks locomo/prompts.py
+    // (CATEGORIES_TO_EVALUATE = [1,2,3,4]). These subtotals are the apples-to-
+    // apples comparable to their published 92.5.
+    public int ScoredTotal => Categories.Where(c => c.CategoryId != 5).Sum(c => c.Total);
+    public int ScoredCorrect => Categories.Where(c => c.CategoryId != 5).Sum(c => c.Correct);
+    public double ScoredAccuracy => ScoredTotal == 0 ? 0 : (double)ScoredCorrect / ScoredTotal;
+
     public static LoCoMoReport Aggregate(IReadOnlyList<QaRecord> rows, string embedderId, string answererId,
         string judgeId, int topK, string ingestMode, string distillerId, string rerankerId)
     {
@@ -490,6 +498,8 @@ public sealed record LoCoMoReport(
         }
         sb.AppendLine("  ---------------------------------------------");
         sb.AppendLine($"  {"OVERALL",-14} {Total,4} {Correct,8} {Accuracy,6:P0}");
+        sb.AppendLine($"  {"Mem0-comp*",-14} {ScoredTotal,4} {ScoredCorrect,8} {ScoredAccuracy,6:P0}");
+        sb.AppendLine("  * categories 1–4 only (adversarial excluded, as Mem0 scores it)");
         sb.AppendLine("================================================");
         return sb.ToString();
     }
@@ -523,19 +533,21 @@ public sealed record LoCoMoReport(
             sb.AppendLine($"| {c.Label} | {c.Total} | {c.Correct} | {c.Accuracy:P1} |");
         }
         sb.AppendLine($"| **Overall** | **{Total}** | **{Correct}** | **{Accuracy:P1}** |");
+        sb.AppendLine($"| **Mem0-comparable (cat 1–4, adversarial excluded)** | **{ScoredTotal}** | **{ScoredCorrect}** | **{ScoredAccuracy:P1}** |");
         sb.AppendLine();
         sb.AppendLine("## Reference: published LoCoMo overall (other memory layers)");
         sb.AppendLine();
         sb.AppendLine("| System | LoCoMo overall | Mean tokens / retrieval | Source |");
         sb.AppendLine("|---|---:|---:|---|");
-        sb.AppendLine($"| **Mneme (this run)** | **{Accuracy:P1}** | **{MeanContextTokens:F0}** | this harness |");
+        sb.AppendLine($"| **Mneme (this run, cat 1–4)** | **{ScoredAccuracy:P1}** | **{MeanContextTokens:F0}** | this harness |");
         sb.AppendLine("| Mem0 | 92.5% | ~6,956 | mem0.ai/research (data May 2026) |");
         sb.AppendLine("| Zep | — (LongMemEval 71.2% w/ gpt-4o) | ~1,600 | getzep.com SOTA paper (Jan 2025) |");
         sb.AppendLine();
-        sb.AppendLine("> Reference numbers are static, model-dependent, and measured by their");
-        sb.AppendLine("> authors — not reproduced here. For a fair head-to-head, run this harness");
-        sb.AppendLine("> with the same answer/judge model the reference used and hold retrieval");
-        sb.AppendLine("> depth fixed; the only variable should be the memory layer.");
+        sb.AppendLine("> Mem0 scores LoCoMo categories 1–4 and EXCLUDES adversarial (category 5);");
+        sb.AppendLine("> the Mem0-comparable row above applies the same exclusion. Reference");
+        sb.AppendLine("> numbers are static, model-dependent, and measured by their authors — not");
+        sb.AppendLine("> reproduced here. For a fair head-to-head, hold the answer/judge model and");
+        sb.AppendLine("> retrieval depth fixed; the only variable should be the memory layer.");
         return sb.ToString();
     }
 }

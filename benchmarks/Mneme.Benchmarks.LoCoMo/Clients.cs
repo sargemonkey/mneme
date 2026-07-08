@@ -85,6 +85,52 @@ public sealed class HybridJudge : IJudge
     }
 }
 
+/// <summary>
+/// LLM judge whose leniency is aligned with the LoCoMo J-score methodology used
+/// by Mem0's public memory-benchmarks (Apache-2.0) so our numbers are
+/// apples-to-apples with their reported figures. Rules (re-expressed, not
+/// copied): partial credit (≥1 gold list item present ⇒ correct), paraphrases /
+/// same-valence sentiments count, extra detail is fine, dates within ~14 days
+/// (durations within ~50%) match, and same-referent answers count. Only WRONG
+/// when the prediction shares no correct item or addresses a different topic.
+/// </summary>
+public sealed class MemAlignedJudge : IJudge
+{
+    private readonly IChatCompletion _chat;
+    public MemAlignedJudge(IChatCompletion chat) => _chat = chat;
+    public string Id => $"mem0-aligned/{_chat.Id}";
+
+    private const string System =
+        "You evaluate conversational-memory answer recall. Label the generated answer " +
+        "CORRECT or WRONG against the gold answer, judging meaning not wording. Be lenient:\n" +
+        "1. PARTIAL CREDIT: if the generated answer contains at least one correct item from " +
+        "the gold answer, it is CORRECT (1 of 2, 2 of 4, etc.). WRONG only if it contains none.\n" +
+        "2. PARAPHRASES: the same concept in different words is CORRECT. Emotions/sentiments in " +
+        "the same positive/negative valence count as equivalent (proud = fulfilled = accomplished).\n" +
+        "3. EXTRA DETAIL is fine — a longer answer that still conveys the gold's core fact is CORRECT.\n" +
+        "4. DATE TOLERANCE: dates within ~14 days match; durations within ~50% match " +
+        "(5 months ≈ six months); a specific date consistent with a vague reference is CORRECT.\n" +
+        "5. SEMANTIC OVERLAP / SAME REFERENT: if the generated answer addresses the same topic and " +
+        "identifies the same entity/person/concept as the gold, it is CORRECT even with different " +
+        "phrasing or added description.\n" +
+        "Mark WRONG only if the generated answer shares zero correct items with the gold or is about " +
+        "a genuinely different topic. Reply with exactly 'CORRECT' or 'WRONG'.";
+
+    public async Task<bool> IsCorrectAsync(string question, string gold, string predicted, CancellationToken ct = default)
+    {
+        var user = $"Question: {question}\nGold answer: {gold}\nGenerated answer: {predicted}\nLabel (CORRECT/WRONG)?";
+        var reply = await _chat.CompleteAsync(System, user, ct).ConfigureAwait(false);
+        // Look at the first decisive token; default to CORRECT-leaning only on explicit CORRECT.
+        var t = reply.TrimStart();
+        if (t.StartsWith("WRONG", StringComparison.OrdinalIgnoreCase)) return false;
+        if (t.StartsWith("CORRECT", StringComparison.OrdinalIgnoreCase)) return true;
+        // Fallback: contains CORRECT but not WRONG.
+        var hasCorrect = t.Contains("CORRECT", StringComparison.OrdinalIgnoreCase);
+        var hasWrong = t.Contains("WRONG", StringComparison.OrdinalIgnoreCase);
+        return hasCorrect && !hasWrong;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // OpenAI-compatible HTTP implementations — turnkey for a REAL run. They speak
 // the chat/completions + embeddings REST shape (path configurable), so they
