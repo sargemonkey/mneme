@@ -9,7 +9,7 @@
 | Phase | State | Key artefact |
 |---|---|---|
 | 0 — Contracts | ✅ | `src/Mneme.Contracts/` (BCL-only, 5 host-pluggable interfaces) |
-| 1 — Event log + ingest | ✅ | `src/Mneme/Storage/SqliteSchema.cs` (v7), `Ingest/` (<50ms p99) |
+| 1 — Event log + ingest | ✅ | `src/Mneme/Storage/SqliteSchema.cs` (v10), `Ingest/` (<50ms p99) |
 | 2 — Classification + revocation | ✅ | `src/Mneme/Classification/`, `Revocation/` |
 | 3 — Projections + FTS5 | ✅ | `src/Mneme/Projections/`, `Search/` (adaptive-BM25) |
 | 4 — Capability-checked query API | ✅ | `src/Mneme/Query/MemoryQueryApi.cs` (+ Explain, AsOf) |
@@ -27,12 +27,13 @@
 | Reranking | ✅ | `IReranker` (6th host seam) — two-stage retrieve-then-rerank; hybrid pool → cross-encoder/LLM rerank → top-k. |
 | LoCoMo harness | ✅ | `benchmarks/Mneme.Benchmarks.LoCoMo` — ingest(turns/facts/both)→embed→retrieve→[rerank]→answer→judge→score; GitHub Models turnkey + rate-limit/retry + resume + CSV/MD export. |
 | 11 — sqlite-vec @ scale | ⏸ partial | Brute-force vectors ship now (sufficient to LoCoMo scale). sqlite-vec still deferred for million-vector corpora; autonomous capture still deferred. |
+| 12 — Subject-attributed KG | 🧪 infra shipped | `FactTriple` + `projection_fact_triples` (schema v10) + `FactTriplesProjector` + subject-scoped query boost + append-only `SubjectTriples` supplement. Retrieval levers **off by default** — no lift beyond LLM noise yet (ANALYSIS Exp 1–7); next = separate extraction pass + lower-noise eval. |
 
-**Verification**: `dotnet test Mneme.slnx` → 327/327 (139 contracts + 185 Mneme + 3 MAF).
+**Verification**: `dotnet test Mneme.slnx` → 341/341 (145 contracts + 193 Mneme + 3 MAF).
 
 ### Benchmarks
 - **`Mneme.Benchmarks.Perf`** — storage-layer latency (BenchmarkDotNet). Ingest ~1.4ms/event; queries sub-ms–low-ms.
-- **`Mneme.Benchmarks.LoCoMo`** — accuracy benchmark vs Mem0/Zep. Best live result (stratified 245 Q across all 10 conversations, both+rerank+iterative+date-context+recall-retry+hybrid-judge, gpt-4o-mini): **53.5% overall, 341 tokens/query** (single 84%, temporal 64%, open-domain 51%, multi-hop 52%, adversarial 16%). Retrieval levers shipped: hybrid semantic+BM25, cross-encoder rerank, iterative multi-hop, date-stamped context, recall-retry. See `benchmarks/Mneme.Benchmarks.LoCoMo/ANALYSIS.md` for the full progression + dip breakdown.
+- **`Mneme.Benchmarks.LoCoMo`** — accuracy benchmark vs Mem0/Zep. Best live result (stratified 245 Q across all 10 conversations, both+rerank+iterative+date-context+recall-retry+hybrid-judge, gpt-4o-mini): **53.5% overall, 341 tokens/query** (single 84%, temporal 64%, open-domain 51%, multi-hop 52%, adversarial 16%). Retrieval levers shipped: hybrid semantic+BM25, cross-encoder rerank, iterative multi-hop, date-stamped context, recall-retry. **Diagnosis (Exp 1–7):** the adversarial/multi-hop gap is entity **attribution**, not recall — ~50% of misses have the gold fact in-context but the model abstains because it's attributed to a distractor. Built a subject-attributed KG (Phase 12) to attack this; neither KG lever beats the semantic baseline beyond LLM noise yet (see below). See `benchmarks/Mneme.Benchmarks.LoCoMo/ANALYSIS.md` for the full progression + dip breakdown + all 7 experiments.
 
 ### Six host-pluggable seams (all in `Mneme.Contracts`, BCL-only)
 `ISessionDistiller`, `IDistiller`, `IEmbeddingProvider`, `IEntityProposer`,
@@ -45,6 +46,7 @@
 - Phase 8: MCP prompts/resources/elicitation/sampling; HTTP transport (split Stdio + Http hosts).
 - Phase 8.5: `MnemeCheckpointStore` (workflow checkpoints), MAF demo sample under `samples/MAF.Demo/`.
 - sqlite-vec for million-vector corpora; vector-score normalization tests + scale benchmark.
+- **Phase 12 KG**: separate high-quality triple-extraction pass (statement-only distiller + richer triples) feeding `projection_fact_triples`, then re-A/B the subject supplement with multiple answer seeds / larger n to clear the noise floor; populate `subject_entity_id` via the Phase-6 resolver. Flip a KG lever's default to on only if it beats the semantic baseline beyond noise.
 - Bump `Microsoft.Extensions.AI.Abstractions` 9.7.0 → 10.0.0 across non-MAF projects (already pulled transitively).
 
 ### Architectural invariant reinforced throughout

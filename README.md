@@ -152,7 +152,7 @@ for the design walkthrough.
 | 2 — Classification + revocation | ✅ | `AddMneme(opts=>{})` DI helper |
 | 3 — Projections + FTS5 | ✅ | facts/decisions/goals/hypotheses + adaptive-BM25 |
 | 4 — Capability-checked query API | ✅ | Explain + AsOf bi-temporal lookup |
-| 4.5 — Benchmarks | ✅ | LoCoMo-style harness (1/6 baseline recall) |
+| 4.5 — Benchmarks | ✅ | Full LoCoMo harness: hybrid retrieval, GitHub-Models runner, resume/CSV/MD |
 | 5 — Distillation | ✅ | `IDistiller` (read) + `ISessionDistiller` (ingest) |
 | 6 — Entity resolution | ✅ | 3-tier (UUID5 / cosine ≥0.95 / LLM-propose) |
 | 7 — Outcome closure | ✅ | `DecisionChainsProjector` + `FeedbackLearner` |
@@ -162,9 +162,10 @@ for the design walkthrough.
 | 9 — HTTP sidecar | ✅ | bearer-auth + Dockerfile |
 | 10 — Cloud sync | ✅ | `ISyncStore` + `SyncEngine` |
 | UI scaffold | ✅ | Studio (Blazor) + Desktop (Photino) + Electron |
-| 11 — sqlite-vec | ⏸ blocked | Waiting on sqlite-vec v1 |
+| 11 — sqlite-vec | ⏸ blocked | Waiting on sqlite-vec v1; brute-force cosine `VectorIndex` shipped as the bridge |
+| 12 — Subject-attributed KG | 🧪 infra shipped | `FactTriple` + `projection_fact_triples` + subject-scoped query/supplement; retrieval levers **off by default** (no lift beyond LLM noise yet — see `benchmarks/.../ANALYSIS.md`) |
 
-**Verification**: `dotnet test Mneme.slnx` → 316/316.
+**Verification**: `dotnet test Mneme.slnx` → 341/341.
 
 ## Background reading
 

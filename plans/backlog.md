@@ -744,6 +744,64 @@ Don't start until v1 (Phases 0-10) has at least one shipping consumer.
 
 ---
 
+## Phase 12 — Subject-attributed knowledge graph
+
+Motivation: a controlled LoCoMo diagnosis (see
+`benchmarks/Mneme.Benchmarks.LoCoMo/ANALYSIS.md`, Experiments 1–7)
+showed the adversarial/multi-hop gap is **not** primarily a recall
+problem — ~50% of misses have the gold fact already in the top-25
+context and the model still abstains, because the fact is
+**attributed to the wrong entity** (a distractor about another
+person). Statement-level facts name every speaker after pronoun
+resolution, so "facts mentioning X" ≠ "facts about X". The fix is a
+subject-attributed index: `(subject, predicate, object)` triples where
+the subject is the specific entity the fact is about.
+
+Shipped (infrastructure, all tested):
+
+- [x] **kg-contracts** — `FactTriple` DTO + optional
+  `FactPayload.Triples` (BCL-only, null-default, append-only-safe;
+  redactor scrubs triple subject/object inline). Query surface:
+  `QueryRequest.SupplementSubjectTriples` → `QueryResult.SubjectTriples`
+  (`SubjectTripleHit`).
+- [x] **kg-storage** — `projection_fact_triples`
+  (`subject_text`, `subject_key`, `subject_entity_id` (nullable),
+  `predicate`, `object`, `valid_at`, `revoked_at`); schema v9→v10.
+  Derived + rebuildable from `memory_events`.
+- [x] **kg-projector** — `FactTriplesProjector` runs alongside
+  `FactsProjector`; normalizes the subject surface form to a stable
+  `SubjectKey`. `subject_entity_id` left null (names are Tier-1
+  ineligible — full resolution is a later pass).
+- [x] **kg-query** — subject-scoped retrieval in `MemoryQueryApi`:
+  a `MnemeOptions.SubjectAttributionBoost` (default **off**) additive
+  boost, and the append-only `SubjectTriples` answer-context supplement.
+
+Findings (why the levers are OFF by default):
+
+- Retrieval-side boost (Exp 6) **regressed** −3.8pp: within a fixed
+  top-k window, promoting/injecting subject facts displaces semantic
+  ones (the losing "replacement" shape).
+- Answer-context supplement (Exp 7) landed at the **LLM-noise floor**
+  (net −2 / 186) when fed by the combined-distiller triples.
+- The one positive prototype (Exp 5, +2.6pp adversarial) drew on a
+  **separate** extraction pass (richer triples from raw turns) and was
+  itself near the noise floor.
+
+Open:
+
+- [ ] **kg-separate-extraction** — Dedicated triple-extraction pass
+  feeding `projection_fact_triples`, with the fact distiller kept
+  statement-only (recover the ~2pp lost to statement+triple
+  double-duty). Then re-run the supplement A/B with **multiple answer
+  seeds / larger n** to clear the noise floor. Only flip a KG lever's
+  default to on if it beats the semantic baseline **beyond noise**.
+- [ ] **kg-subject-entity-resolution** — Populate
+  `subject_entity_id` by routing triple subjects through the Phase-6
+  `EntityResolver` (Tier 2/3) so possessive chains and aliases unify
+  to canonical ids, replacing the surface-key `LIKE` match.
+
+---
+
 ## Cross-cutting / nice-to-have (not blocking any phase)
 
 - [x] **ci-github-actions** — Workflow that runs `dotnet build` +
