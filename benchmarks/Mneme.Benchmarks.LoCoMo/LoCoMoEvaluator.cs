@@ -42,17 +42,19 @@ public sealed class LoCoMoEvaluator
     private readonly bool _entityBoost;
     private readonly TripleExtractor? _tripleExtractor;
     private readonly bool _subjectBoost;
+    private readonly bool _kgSupplement;
 
     public LoCoMoEvaluator(string dataRoot, IEmbeddingProvider embedder, IAnswerer answerer, IJudge judge,
         ISessionDistiller? distiller, IReranker? reranker, QueryPlanner? planner, IngestMode mode, int topK,
         int concurrency = 1, bool recallRetry = false, IReadOnlySet<string>? categories = null, bool reuseDb = false,
-        bool entityBoost = false, TripleExtractor? tripleExtractor = null, bool subjectBoost = true)
+        bool entityBoost = false, TripleExtractor? tripleExtractor = null, bool subjectBoost = true, bool kgSupplement = false)
     {
         _categories = categories is { Count: > 0 } ? categories : null;
         _reuseDb = reuseDb;
         _entityBoost = entityBoost;
         _tripleExtractor = tripleExtractor;
         _subjectBoost = subjectBoost;
+        _kgSupplement = kgSupplement;
         _dataRoot = dataRoot;
         _embedder = embedder;
         _answerer = answerer;
@@ -242,9 +244,13 @@ public sealed class LoCoMoEvaluator
         var poolLimit = _entityBoost ? Math.Min(limit * 4, 120) : limit;
         var entities = _entityBoost ? ExtractQueryEntities(question) : Array.Empty<string>();
         var best = new Dictionary<string, (double Score, string Text)>();
+        var supplementLines = new List<string>();
+        var supplementSeen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var q in queries)
         {
-            var res = await query.QueryAsync(new QueryRequest(new QuerySpec(ws, FreeText: q, Limit: poolLimit)), token, ct).ConfigureAwait(false);
+            var res = await query.QueryAsync(new QueryRequest(
+                new QuerySpec(ws, FreeText: q, Limit: poolLimit),
+                SupplementSubjectTriples: _kgSupplement), token, ct).ConfigureAwait(false);
             foreach (var item in res.Items)
             {
                 var dated = $"[{item.ValidAt:yyyy-MM-dd}] {item.Summary}";
@@ -261,13 +267,32 @@ public sealed class LoCoMoEvaluator
                 if (!best.TryGetValue(item.EventId.Value, out var cur) || score > cur.Score)
                     best[item.EventId.Value] = (score, dated);
             }
+            // Collect the production subject-triple supplement (append-only; the
+            // semantic items above are untouched — this is the validated form).
+            if (res.SubjectTriples is { Count: > 0 })
+            {
+                foreach (var h in res.SubjectTriples)
+                {
+                    var line = $"[{h.ValidAt:yyyy-MM-dd}] {h.Triple.Subject} {h.Triple.Predicate.Replace('_', ' ')} {h.Triple.Object}";
+                    if (supplementSeen.Add(line)) supplementLines.Add(line);
+                }
+            }
         }
         var semantic = best.Values.OrderByDescending(v => v.Score).Take(limit).Select(v => v.Text);
 
-        // Knowledge-graph mode: prepend subject-scoped triples for the entities the
-        // question names. These are structurally attributed to the asked-about
-        // person, so they front-load the answer with the right sub-graph and push
-        // distractor facts out of the visible window.
+        // Production KG supplement: keep the full semantic top-k intact and APPEND
+        // the subject-scoped triples (window expands — no displacement). This is
+        // the shipped-code form of the validated Experiment 5 win.
+        if (_kgSupplement && supplementLines.Count > 0)
+        {
+            var sem = semantic.ToList();
+            var extra = supplementLines.Where(s => !sem.Contains(s));
+            return sem.Concat(extra).ToArray();
+        }
+
+        // Knowledge-graph mode (prototype sidecar): prepend subject-scoped triples
+        // for the entities the question names. Kept for comparison with the
+        // production supplement path above.
         if (triples is not null)
         {
             var subjects = ExtractQueryEntities(question)

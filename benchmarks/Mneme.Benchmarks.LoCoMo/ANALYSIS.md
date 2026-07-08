@@ -455,3 +455,34 @@ Do not enable a lever that regresses in a controlled test. The path to the win i
 answer-context supplementation (append subject-scoped triples alongside full
 facts), and ideally a **separate** triple-extraction pass so fact-statement
 quality is not diluted. Left as the next scoped step; the projection is ready for it.
+
+### Experiment 7 — answer-context supplement in the shipped path. **At the noise floor.**
+
+Built the validated "supplement, don't replace" form in shipped code:
+QueryRequest.SupplementSubjectTriples → QueryResult.SubjectTriples (append-only
+subject-scoped triples the consumer adds alongside the ranked items; the semantic
+result is untouched). Benchmark --kg-supplement appends them to the answer context
+(window grows 601→709 tokens, confirming it engaged).
+
+A/B on identical fresh triple-DBs (only the supplement toggles):
+
+| Config (identical fresh triple-DBs) | multi-hop | adversarial | overall |
+|---|---:|---:|---:|
+| boost OFF, no supplement | 52.7% | 19.6% | 32.8% |
+| boost OFF, **supplement ON** | 54.1% | 17.0% | 31.7% |
+
+Per-question: 5 gains / 7 regressions (**net −2**), only 62/186 predictions changed,
+174 unchanged. This is within LLM answer non-determinism (±~4pp on n=112 adversarial),
+i.e. **no demonstrable effect**. The earlier prototype win (Exp 5, +2.6pp / net +4)
+was also near this floor AND drew on a *separate* extraction pass (296 rich triples
+from raw turns) vs the production combined-distiller triples (242, lower quality
+because the distiller did statement+triple double-duty — the same −2pp seen in Exp 6).
+
+**Conclusion.** The KG data layer (contract, projection, projector, query surface,
+supplement API) is built, tested, and shipped — but neither the retrieval boost
+(Exp 6) nor the answer supplement (Exp 7) beats the semantic baseline beyond noise
+on this benchmark with the current triple source. Both stay OFF by default. A
+definitive verdict needs (a) a **separate** high-quality triple-extraction pass
+feeding projection_fact_triples (so statement quality isn't diluted and triples are
+richer), and (b) a lower-noise eval (multiple answer seeds / larger n). Further
+benchmark grinding at the noise floor is not warranted until those are in place.

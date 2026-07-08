@@ -6,10 +6,32 @@ namespace Mneme.Contracts;
 /// <param name="Items">Matched events, ranked by final score (highest first).</param>
 /// <param name="TotalMatched">Total matches before the <see cref="QuerySpec.Limit"/> was applied. <c>Items.Count</c> &lt;= this.</param>
 /// <param name="Explain">Global diagnostic info (set when <see cref="QueryRequest.Explain"/> is true).</param>
+/// <param name="SubjectTriples">
+/// Subject-scoped fact triples surfaced as an answer-context <em>supplement</em>
+/// when <see cref="QueryRequest.SupplementSubjectTriples"/> is set. These are
+/// structured assertions about the entities named in the query; a consumer
+/// appends them alongside <see cref="Items"/> (never replacing them) so the
+/// asked-about person's attributed facts are present without displacing the
+/// semantic result. Empty unless requested.
+/// </param>
 public sealed record QueryResult(
     IReadOnlyList<QueryResultItem> Items,
     int TotalMatched,
-    QueryExplain? Explain = null);
+    QueryExplain? Explain = null,
+    IReadOnlyList<SubjectTripleHit>? SubjectTriples = null);
+
+/// <summary>
+/// A subject-attributed fact triple surfaced as an answer-context supplement
+/// (see <see cref="QueryResult.SubjectTriples"/>). Carries the triple, the date
+/// its claim was valid, and the source event so a consumer can cite it.
+/// </summary>
+/// <param name="Triple">The structured (subject, predicate, object) assertion.</param>
+/// <param name="ValidAt">When the underlying fact's claim was true in the world.</param>
+/// <param name="SourceEvent">The fact event the triple was extracted from.</param>
+public sealed record SubjectTripleHit(
+    FactTriple Triple,
+    DateTimeOffset ValidAt,
+    EventId SourceEvent);
 
 /// <summary>A single hit from a query.</summary>
 /// <param name="EventId">The matched event's id.</param>

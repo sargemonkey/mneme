@@ -103,6 +103,64 @@ public sealed class SubjectScopedQueryTests : IDisposable
         Assert.Contains(result.Items, i => i.EventId.Value == "kgq2-mel");
     }
 
+    [Fact]
+    public async Task Subject_triple_supplement_is_populated_without_displacing_items()
+    {
+        using var sp = Build("kgq3");
+        var agent = sp.GetRequiredService<IMemoryAgent>();
+        var vectors = sp.GetRequiredService<VectorIndex>();
+        var query = sp.GetRequiredService<IMemoryQueryAPI>();
+        var token = sp.GetRequiredService<CapabilityToken>();
+        var ws = new WorkstreamId("kgq3");
+
+        await agent.IngestAsync(Fact("kgq3-mel", "kgq3",
+            "Melanie enjoys listening to Bach and Mozart",
+            new FactTriple("Melanie", "enjoys", "Bach and Mozart")));
+        await agent.IngestAsync(Fact("kgq3-car", "kgq3",
+            "Caroline mentioned Bach and Mozart at the concert",
+            new FactTriple("Caroline", "mentioned", "Bach and Mozart")));
+        await vectors.BackfillAsync(ws);
+
+        // Without the flag: no supplement.
+        var plain = await query.QueryAsync(new QueryRequest(
+            new QuerySpec(ws, FreeText: "Which classical musicians does Melanie enjoy?")), token);
+        Assert.True(plain.SubjectTriples is null || plain.SubjectTriples.Count == 0);
+        var plainItemCount = plain.Items.Count;
+
+        // With the flag: the Melanie-subject triple is supplied as a supplement,
+        // and the ranked items are unchanged (no displacement).
+        var supplemented = await query.QueryAsync(new QueryRequest(
+            new QuerySpec(ws, FreeText: "Which classical musicians does Melanie enjoy?"),
+            SupplementSubjectTriples: true), token);
+
+        Assert.NotNull(supplemented.SubjectTriples);
+        Assert.Contains(supplemented.SubjectTriples!, h => h.Triple.Subject == "Melanie");
+        Assert.DoesNotContain(supplemented.SubjectTriples!, h => h.Triple.Subject == "Caroline");
+        Assert.Equal(plainItemCount, supplemented.Items.Count);
+    }
+
+    [Fact]
+    public async Task Subject_triple_supplement_empty_when_query_names_no_known_entity()
+    {
+        using var sp = Build("kgq4");
+        var agent = sp.GetRequiredService<IMemoryAgent>();
+        var vectors = sp.GetRequiredService<VectorIndex>();
+        var query = sp.GetRequiredService<IMemoryQueryAPI>();
+        var token = sp.GetRequiredService<CapabilityToken>();
+        var ws = new WorkstreamId("kgq4");
+
+        await agent.IngestAsync(Fact("kgq4-mel", "kgq4",
+            "Melanie enjoys hiking",
+            new FactTriple("Melanie", "enjoys", "hiking")));
+        await vectors.BackfillAsync(ws);
+
+        var result = await query.QueryAsync(new QueryRequest(
+            new QuerySpec(ws, FreeText: "what are the weekend plans?"),
+            SupplementSubjectTriples: true), token);
+
+        Assert.True(result.SubjectTriples is null || result.SubjectTriples.Count == 0);
+    }
+
     private sealed class BagOfWordsEmbedder : IEmbeddingProvider
     {
         public string Id => "test/bag-of-words@64";

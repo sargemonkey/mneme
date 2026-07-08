@@ -26,6 +26,36 @@ public sealed class QueryTests
     }
 
     [Fact]
+    public void QueryRequest_DefaultSupplementSubjectTriplesIsFalse()
+    {
+        var req = new QueryRequest(new QuerySpec(new WorkstreamId("w")));
+        Assert.False(req.SupplementSubjectTriples);
+    }
+
+    [Fact]
+    public void QueryResult_DefaultSubjectTriplesIsNull()
+    {
+        var result = new QueryResult(Array.Empty<QueryResultItem>(), 0);
+        Assert.Null(result.SubjectTriples);
+    }
+
+    [Fact]
+    public void SubjectTripleHit_CarriesTripleDateAndSource()
+    {
+        var at = DateTimeOffset.UtcNow;
+        var hit = new SubjectTripleHit(
+            new FactTriple("Melanie", "lives_in", "Sweden"), at, new EventId("ev-1"));
+        Assert.Equal("Melanie", hit.Triple.Subject);
+        Assert.Equal("lives_in", hit.Triple.Predicate);
+        Assert.Equal("Sweden", hit.Triple.Object);
+        Assert.Equal(at, hit.ValidAt);
+        Assert.Equal("ev-1", hit.SourceEvent.Value);
+
+        var result = new QueryResult(Array.Empty<QueryResultItem>(), 0, SubjectTriples: new[] { hit });
+        Assert.Single(result.SubjectTriples!);
+    }
+
+    [Fact]
     public void DistillOptions_DefaultsAreNotForce_NoBudget()
     {
         var o = new DistillOptions();

@@ -154,7 +154,19 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
                 CandidatesGatedOut: gatedOut);
         }
 
-        return new QueryResult(items, totalMatched, explain);
+        // Answer-context supplement (the validated win): surface subject-scoped
+        // triples for the entities named in the query as an APPEND-ONLY list the
+        // consumer can add alongside the ranked items. The semantic result above
+        // is untouched — nothing is displaced. Only for free-text queries within
+        // a single workstream (subject scoping needs the query text + the
+        // workstream's triple projection).
+        IReadOnlyList<SubjectTripleHit>? subjectTriples = null;
+        if (request.SupplementSubjectTriples && hasFreeText && spec.Workstream is not null && !resolved.CrossWorkstream)
+        {
+            subjectTriples = LoadSubjectTripleSupplement(spec.Workstream.Value, spec.FreeText!, limit);
+        }
+
+        return new QueryResult(items, totalMatched, explain, subjectTriples);
     }
 
     /// <inheritdoc/>
@@ -549,6 +561,50 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
                 Details: details));
         }
         return (items, items.Count, "hybrid-semantic-bm25", fused.Count, gated);
+    }
+
+    // Subject-scoped triple supplement for the answer context: structured triples
+    // whose subject matches an entity named in the query, capped and de-duplicated.
+    // Returned as an append-only list (QueryResult.SubjectTriples) so a consumer
+    // can add the queried person's attributed facts alongside the ranked items
+    // without displacing them. Ordered most-recent-first; excludes revoked triples.
+    private IReadOnlyList<SubjectTripleHit> LoadSubjectTripleSupplement(WorkstreamId workstream, string freeText, int limit)
+    {
+        var subjectKeys = SubjectKey.ExtractSubjects(freeText);
+        if (subjectKeys.Count == 0) return Array.Empty<SubjectTripleHit>();
+
+        var cap = Math.Max(6, limit / 3);
+        var hits = new List<SubjectTripleHit>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        using var c = _connections.Open();
+        foreach (var key in subjectKeys)
+        {
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = """
+                SELECT subject_text, predicate, object, valid_at, event_id
+                FROM projection_fact_triples
+                WHERE workstream_id = $ws
+                  AND revoked_at IS NULL
+                  AND (subject_key LIKE '%' || $k || '%' OR $k LIKE '%' || subject_key || '%')
+                ORDER BY valid_at DESC;
+                """;
+            cmd.Parameters.AddWithValue("$ws", workstream.Value);
+            cmd.Parameters.AddWithValue("$k", key);
+            using var rd = cmd.ExecuteReader();
+            while (rd.Read() && hits.Count < cap)
+            {
+                var subject = rd.GetString(0);
+                var predicate = rd.GetString(1);
+                var obj = rd.GetString(2);
+                var dedup = $"{subject}\u0001{predicate}\u0001{obj}";
+                if (!seen.Add(dedup)) continue;
+                var validAt = DateTimeOffset.Parse(rd.GetString(3), System.Globalization.CultureInfo.InvariantCulture);
+                hits.Add(new SubjectTripleHit(
+                    new FactTriple(subject, predicate, obj), validAt, new EventId(rd.GetString(4))));
+            }
+            if (hits.Count >= cap) break;
+        }
+        return hits;
     }
 
     // Event ids in the workstream that carry a non-revoked fact triple whose

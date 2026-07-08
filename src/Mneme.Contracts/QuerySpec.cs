@@ -32,9 +32,17 @@ public sealed record QuerySpec(
 /// </summary>
 /// <param name="Spec">The query parameters.</param>
 /// <param name="Explain">If true, <see cref="QueryResultItem.Details"/> is populated with score-decomposition data. Off by default to keep responses lean.</param>
+/// <param name="SupplementSubjectTriples">
+/// If true, <see cref="QueryResult.SubjectTriples"/> is populated with
+/// subject-scoped fact triples for the entities named in
+/// <see cref="QuerySpec.FreeText"/>. These are an answer-context supplement the
+/// consumer appends alongside the ranked items; the semantic result is left
+/// untouched (no displacement). Off by default.
+/// </param>
 public sealed record QueryRequest(
     QuerySpec Spec,
-    bool Explain = false);
+    bool Explain = false,
+    bool SupplementSubjectTriples = false);
 
 /// <summary>
 /// Distillation options for <see cref="IMemoryQueryAPI.DistillAsync"/>.
