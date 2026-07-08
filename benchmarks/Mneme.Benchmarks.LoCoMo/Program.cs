@@ -150,6 +150,7 @@ internal static class Program
         BuildClients(string[] args)
     {
         var provider = (Environment.GetEnvironmentVariable("MNEME_LLM_PROVIDER") ?? "").Trim().ToLowerInvariant();
+        var kgTriples = args.Contains("--kg-triples"); // separate triple-extraction pass in the distiller
         var rpm = double.TryParse(GetArg(args, "--rpm") ?? Environment.GetEnvironmentVariable("MNEME_LLM_RPM"), out var r) ? r : 120.0;
         var maxRetries = int.TryParse(Environment.GetEnvironmentVariable("MNEME_LLM_MAX_RETRIES"), out var mr) ? mr : 8;
 
@@ -179,7 +180,7 @@ internal static class Program
             var http = new ThrottledHttp(ghBase, token, rpm, maxRetries, ghHeaders);
             var ghChat = new OpenAICompatibleChat(http, chatModel, "inference/chat/completions");
             var ghEmbed = new OpenAICompatibleEmbedder(http, embModel, embDim, "inference/embeddings");
-            return (ghEmbed, ghChat, ghChat, new LlmSessionDistiller(ghChat),
+            return (ghEmbed, ghChat, ghChat, new LlmSessionDistiller(ghChat, kgTriples),
                 $"github-models ({chatModel} + {embModel}, {rpm:0} rpm)");
         }
 
@@ -203,7 +204,7 @@ internal static class Program
         var embedHttp = embedBaseUrl == baseUrl && embedKey == apiKey
             ? chatHttp : new ThrottledHttp(embedBaseUrl, embedKey, rpm, maxRetries);
         var embedder = new OpenAICompatibleEmbedder(embedHttp, embedModel, embedDim);
-        return (embedder, chat, chat, new LlmSessionDistiller(chat),
+        return (embedder, chat, chat, new LlmSessionDistiller(chat, kgTriples),
             $"live ({model} + {embedModel}, {rpm:0} rpm)");
 
         static (IEmbeddingProvider, IAnswerer, IJudge, ISessionDistiller?, string) Offline() =>
