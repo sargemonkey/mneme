@@ -486,3 +486,41 @@ definitive verdict needs (a) a **separate** high-quality triple-extraction pass
 feeding projection_fact_triples (so statement quality isn't diluted and triples are
 richer), and (b) a lower-noise eval (multiple answer seeds / larger n). Further
 benchmark grinding at the noise floor is not warranted until those are in place.
+
+### Experiment 8 — separate triple-extraction pass + supplement. **The win (+3.2pp overall, +3.5pp adversarial).**
+
+Fixes the two flaws Exp 6–7 exposed: (1) the distiller now runs statement
+extraction and triple extraction as **two dedicated LLM calls** (`--kg-triples`)
+instead of one combined prompt, so neither is done at half-attention; (2) the
+richer triples feed the append-only answer-context supplement (`--kg-supplement`,
+`QueryResult.SubjectTriples`) — semantic items untouched, window grows 608→710.
+
+A/B on identical fresh two-pass-distilled DBs (only the supplement toggles):
+
+| Config (identical DBs) | multi-hop | adversarial | overall |
+|---|---:|---:|---:|
+| supplement OFF | 56.8% | 16.1% | 32.3% |
+| supplement **ON** | 59.5% | **19.6%** | **35.5%** |
+
+Per-question: **net +6** (10 gains / 4 regressions), and the gains concentrate in
+the target category — **adversarial net +4** (5 gains / 1 regression), multi-hop
+net +2. Above the ±2 noise floor seen in Exp 7, and mechanistically where the
+theory predicts (attribution). Example adversarial gains: "Why did Caroline get
+into running? → de-stress", "Why did Melanie choose the adoption agency? →
+inclusivity", "How did Caroline feel after the accident? → grateful".
+
+**Why it works now where Exp 7 didn't.** Exp 7 fed the supplement with
+*combined-distiller* triples (the model splitting attention between statements and
+triples) → net −2. A **dedicated** triple pass yields more, and more precisely
+attributed, triples → net +6. Triple *source quality* was the missing variable.
+(Statement-only distillation did **not** recover a higher base — 32.3% vs the
+combined-prompt 32.8% — so the earlier 34.9% was distillation-run variance, not a
+combined-prompt penalty.)
+
+**Status.** Both halves shipped + tested: two-pass `LlmSessionDistiller`
+(benchmark host) and `QueryResult.SubjectTriples` (Mneme). The supplement is a
+per-request opt-in (`QueryRequest.SupplementSubjectTriples`) — the validated way
+to use the KG. `SubjectTripleResolver` additionally binds triple subjects to
+canonical entity ids (Phase-6) for alias unification. Recommended host recipe:
+distill statements + triples in separate passes, then query with
+`SupplementSubjectTriples: true`.

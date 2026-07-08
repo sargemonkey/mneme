@@ -776,29 +776,41 @@ Shipped (infrastructure, all tested):
   a `MnemeOptions.SubjectAttributionBoost` (default **off**) additive
   boost, and the append-only `SubjectTriples` answer-context supplement.
 
-Findings (why the levers are OFF by default):
+Findings (the levers, and what makes them work):
 
 - Retrieval-side boost (Exp 6) **regressed** −3.8pp: within a fixed
   top-k window, promoting/injecting subject facts displaces semantic
-  ones (the losing "replacement" shape).
-- Answer-context supplement (Exp 7) landed at the **LLM-noise floor**
-  (net −2 / 186) when fed by the combined-distiller triples.
-- The one positive prototype (Exp 5, +2.6pp adversarial) drew on a
-  **separate** extraction pass (richer triples from raw turns) and was
-  itself near the noise floor.
+  ones (the losing "replacement" shape). Kept behind
+  `SubjectAttributionBoost` (default off).
+- Answer-context supplement fed by *combined-distiller* triples
+  (Exp 7) landed at the noise floor (net −2 / 186).
+- Answer-context supplement fed by a **separate** triple-extraction
+  pass (Exp 8) **won: +3.2pp overall, +3.5pp adversarial** (net +6 /
+  186, gains concentrated in the target category). Triple *source
+  quality* was the missing variable — a dedicated triple prompt yields
+  more, and more precisely attributed, triples than a combined
+  statement+triple prompt.
 
-Open:
+Done:
 
-- [ ] **kg-separate-extraction** — Dedicated triple-extraction pass
-  feeding `projection_fact_triples`, with the fact distiller kept
-  statement-only (recover the ~2pp lost to statement+triple
-  double-duty). Then re-run the supplement A/B with **multiple answer
-  seeds / larger n** to clear the noise floor. Only flip a KG lever's
-  default to on if it beats the semantic baseline **beyond noise**.
-- [ ] **kg-subject-entity-resolution** — Populate
-  `subject_entity_id` by routing triple subjects through the Phase-6
-  `EntityResolver` (Tier 2/3) so possessive chains and aliases unify
-  to canonical ids, replacing the surface-key `LIKE` match.
+- [x] **kg-separate-extraction** — `LlmSessionDistiller` runs statement
+  and triple extraction as two dedicated LLM calls (`--kg-triples`),
+  attaching triples to the fact they most overlap by supporting entry.
+  Validated the supplement win (Exp 8). The recommended host recipe:
+  distill statements + triples in separate passes, then query with
+  `QueryRequest.SupplementSubjectTriples: true`.
+- [x] **kg-subject-entity-resolution** — `SubjectTripleResolver`
+  post-projection pass binds distinct triple subjects to canonical
+  entity ids via the Phase-6 `EntityResolver` (idempotent), stamping
+  `subject_entity_id` so aliases/re-mentions unify when an embedding
+  provider is wired.
+
+Open (further, not blocking):
+
+- [ ] **kg-entity-scoped-retrieval** — Once `subject_entity_id` is
+  populated, match the supplement/boost on the resolved entity id
+  (unifying aliases) rather than the surface-key `LIKE`, and resolve
+  the *query's* subject to the same id space.
 
 ---
 

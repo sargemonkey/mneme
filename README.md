@@ -163,7 +163,7 @@ for the design walkthrough.
 | 10 — Cloud sync | ✅ | `ISyncStore` + `SyncEngine` |
 | UI scaffold | ✅ | Studio (Blazor) + Desktop (Photino) + Electron |
 | 11 — sqlite-vec | ⏸ blocked | Waiting on sqlite-vec v1; brute-force cosine `VectorIndex` shipped as the bridge |
-| 12 — Subject-attributed KG | 🧪 infra shipped | `FactTriple` + `projection_fact_triples` + subject-scoped query/supplement; retrieval levers **off by default** (no lift beyond LLM noise yet — see `benchmarks/.../ANALYSIS.md`) |
+| 12 — Subject-attributed KG | ✅ | `FactTriple` + `projection_fact_triples` + subject-scoped query + append-only `SubjectTriples` supplement + `SubjectTripleResolver`. **Validated: separate triple pass + answer-context supplement = +3.2pp overall / +3.5pp adversarial** (`benchmarks/.../ANALYSIS.md` Exp 8) |
 
 **Verification**: `dotnet test Mneme.slnx` → 341/341.
 

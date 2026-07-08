@@ -27,7 +27,7 @@
 | Reranking | ✅ | `IReranker` (6th host seam) — two-stage retrieve-then-rerank; hybrid pool → cross-encoder/LLM rerank → top-k. |
 | LoCoMo harness | ✅ | `benchmarks/Mneme.Benchmarks.LoCoMo` — ingest(turns/facts/both)→embed→retrieve→[rerank]→answer→judge→score; GitHub Models turnkey + rate-limit/retry + resume + CSV/MD export. |
 | 11 — sqlite-vec @ scale | ⏸ partial | Brute-force vectors ship now (sufficient to LoCoMo scale). sqlite-vec still deferred for million-vector corpora; autonomous capture still deferred. |
-| 12 — Subject-attributed KG | 🧪 infra shipped | `FactTriple` + `projection_fact_triples` (schema v10) + `FactTriplesProjector` + subject-scoped query boost + append-only `SubjectTriples` supplement. Retrieval levers **off by default** — no lift beyond LLM noise yet (ANALYSIS Exp 1–7); next = separate extraction pass + lower-noise eval. |
+| 12 — Subject-attributed KG | ✅ | `FactTriple` + `projection_fact_triples` (schema v10) + `FactTriplesProjector` + subject-scoped query boost + append-only `SubjectTriples` supplement + `SubjectTripleResolver`. **Validated (Exp 8):** two-pass distill (statements + separate triples) → answer-context supplement = **+3.2pp overall, +3.5pp adversarial** (net +6/186). |
 
 **Verification**: `dotnet test Mneme.slnx` → 341/341 (145 contracts + 193 Mneme + 3 MAF).
 
