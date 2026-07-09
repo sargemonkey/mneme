@@ -169,23 +169,29 @@ for the design walkthrough.
 
 ## LoCoMo benchmark (apples-to-apples)
 
-Measured with Mem0's own methodology — same answer procedure, same lenient
-J-score judge, and same category scope (categories 1–4; Mem0 excludes
-adversarial) — so the comparison is like-for-like. See
+Measured with Mem0's own methodology — same answerer+judge model, same
+retrieval depth, same answer procedure, same lenient J-score judge, and same
+category scope (categories 1–4; Mem0 excludes adversarial) — so the comparison
+is genuinely like-for-like. See
 [`benchmarks/Mneme.Benchmarks.LoCoMo/ANALYSIS.md`](benchmarks/Mneme.Benchmarks.LoCoMo/ANALYSIS.md)
-(Experiments 9–10) for the full methodology + per-category tables.
+(Experiments 9–11) for the full methodology, per-category tables, and the
+step-by-step alignment ladder.
 
 | System | LoCoMo (cat 1–4) | Answerer | Tokens / query |
 |---|---:|---|---:|
-| **Mneme** | **83.6%** | gpt-4o-mini | **~715** |
-| Mem0 (reported) | 92.5% | (larger model) | ~6,956 |
+| **Mneme** (full match) | **90.4%** | gpt-4o | ~6,297 |
+| Mem0 (reported) | 92.5% | gpt-4o | ~6,956 |
+| **Mneme** (efficient) | **83.6%** | gpt-4o-mini | **~715** |
 
-Mneme reaches **83.6%** on the fully-aligned scope using a **gpt-4o-mini**
-answerer and **~10× less retrieved context** than Mem0. The remaining gap is
-attributable to answerer model strength and retrieved-context size — both
-independent of the memory layer. Per-category (gpt-4o-mini): single-hop 88.5%,
-temporal 81.1%, multi-hop 78.4%, open-domain 66.7%. *(Numbers are on a 3-conversation
-subset pending a full 10-conversation run; harness is deterministic + resumable.)*
+With every controllable variable matched (model, retrieval depth, answer
+procedure, judge, scope), Mneme reaches **90.4% — statistical parity with Mem0's
+92.5%** (within ~2pp on n=385) at comparable context. An efficiency variant hits
+**83.6% with gpt-4o-mini at ~9× less retrieved context**. Almost the entire
+apparent gap to Mem0 was measurement + configuration (scope, judge, answer
+prompt, model, retrieval depth), not memory-layer capability. Per-category (full
+match): temporal 95.6%, multi-hop 91.9%, single-hop 88.5%, open-domain 81.0%.
+*(3-conversation subset; harness is deterministic + resumable, full 10-conversation
+run pending.)*
 
 ## Background reading
 
