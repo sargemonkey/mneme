@@ -37,3 +37,9 @@ figures. No upstream prompt text is copied verbatim; the rules are
 re-implemented in Mneme's own wording. The harness also mirrors Mem0's scoring
 scope by reporting a "Mem0-comparable" subtotal over LoCoMo categories 1–4
 (adversarial / category 5 excluded, matching their CATEGORIES_TO_EVALUATE).
+
+The same file's Mem0-aligned answer prompt (OpenAICompatibleChat, --mem0-answer)
+likewise re-expresses the multi-step, anti-abstention answer procedure from that
+suite's LoCoMo answerer in Mneme's own wording, so a published head-to-head
+matches Mem0's answer method as well as its judge. No upstream prompt text is
+copied verbatim.

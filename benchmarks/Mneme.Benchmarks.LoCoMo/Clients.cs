@@ -151,20 +151,59 @@ public sealed class OpenAICompatibleChat : IAnswerer, IJudge, IChatCompletion
     private readonly ThrottledHttp _http;
     private readonly string _model;
     private readonly string _chatPath;
+    private readonly bool _mem0Answer;
     public string Id { get; }
 
-    public OpenAICompatibleChat(ThrottledHttp http, string model, string chatPath = "v1/chat/completions")
+    public OpenAICompatibleChat(ThrottledHttp http, string model, string chatPath = "v1/chat/completions", bool mem0Answer = false)
     {
         _http = http;
         _model = model;
         _chatPath = chatPath;
-        Id = $"openai-compatible/{model}";
+        _mem0Answer = mem0Answer;
+        Id = $"openai-compatible/{model}" + (mem0Answer ? "+mem0-answer" : "");
     }
+
+    // Mem0-aligned answer prompt: re-expresses the multi-step, anti-abstention
+    // reasoning of Mem0's public LoCoMo answerer (mem0ai/memory-benchmarks,
+    // Apache 2.0) in Mneme's own words so a published comparison matches their
+    // answer procedure, not just their judge. No prompt text is copied verbatim.
+    private const string Mem0AnswerSystem =
+        "You answer a question using retrieved memories from past conversations. Work through " +
+        "these steps in order:\n" +
+        "1. SCAN EVERY memory below, first to last — relevant details are often scattered far down " +
+        "the list; weight all positions equally. Each snippet is prefixed with [YYYY-MM-DD], the " +
+        "date it was said.\n" +
+        "2. VERIFY ATTRIBUTION: make sure each memory you use is about the person the question asks " +
+        "about; do not borrow a fact stated about someone else. In two-person chats, both speakers' " +
+        "actions are valid evidence, but keep the attribution correct.\n" +
+        "3. COMBINE facts across memories about the same topic; for list/count questions extract " +
+        "EVERY distinct item from ALL memories and enumerate before counting. Connect related facts " +
+        "(a 'nearby lake' named elsewhere is that lake; 'bought in Paris' implies France).\n" +
+        "4. PREFER THE MOST SPECIFIC answer — a name, title, number, or specific activity beats a " +
+        "generic description. Compare each candidate to the SPECIFIC question, not its list position. " +
+        "Report what someone actually DID, not what was merely offered or available.\n" +
+        "5. TEMPORAL GROUNDING: these conversations occurred around the dates shown (2022–2024). " +
+        "Compute intervals from the snippet dates; when something was 'shared/mentioned' on a date, " +
+        "the event is usually shortly before it. Never invent dates or output 2025+.\n" +
+        "6. INCLUSION: for lists/counts, include every supported item — the common mistake is " +
+        "dropping valid items by over-filtering. The question assumes something happened; find what.\n" +
+        "7. COMMIT: give a direct, specific answer — a word, phrase, date, or short list. Do NOT say " +
+        "'not specified', 'not mentioned', or 'I don't know' when any memory holds relevant " +
+        "information; give the best-supported answer. Never invent names/dates absent from the " +
+        "memories. Put the final answer after 'ANSWER:'.";
 
     public async Task<string> AnswerAsync(string question, IReadOnlyList<string> context, CancellationToken ct = default)
     {
         var ctx = context.Count == 0 ? "(no relevant memory retrieved)"
             : string.Join("\n", context.Select((c, i) => $"[{i + 1}] {c}"));
+
+        if (_mem0Answer)
+        {
+            var mUser = $"Memories:\n{ctx}\n\nQuestion: {question}\nWork through the steps, then answer after 'ANSWER:'.";
+            var raw = await CompleteAsync(Mem0AnswerSystem, mUser, ct).ConfigureAwait(false);
+            return ExtractFinalAnswer(raw);
+        }
+
         var system = "You answer questions about a long personal conversation using the retrieved " +
                      "memory snippets as evidence. Each snippet is prefixed with [YYYY-MM-DD], the " +
                      "date it was said — use these for any 'when', 'how long', or date-difference " +
@@ -175,6 +214,15 @@ public sealed class OpenAICompatibleChat : IAnswerer, IJudge, IChatCompletion
                      "answer \"I don't know\" if the snippets give no basis at all.";
         var user = $"Memory snippets:\n{ctx}\n\nQuestion: {question}\nShort answer:";
         return await CompleteAsync(system, user, ct).ConfigureAwait(false);
+    }
+
+    // The Mem0-style prompt emits chain-of-thought then "ANSWER:"; keep only the
+    // final answer for grading (fall back to the whole reply if the marker is absent).
+    private static string ExtractFinalAnswer(string raw)
+    {
+        var idx = raw.LastIndexOf("ANSWER:", StringComparison.OrdinalIgnoreCase);
+        if (idx < 0) return raw.Trim();
+        return raw[(idx + "ANSWER:".Length)..].Trim();
     }
 
     public async Task<bool> IsCorrectAsync(string question, string gold, string predicted, CancellationToken ct = default)
