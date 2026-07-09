@@ -152,7 +152,7 @@ for the design walkthrough.
 | 2 — Classification + revocation | ✅ | `AddMneme(opts=>{})` DI helper |
 | 3 — Projections + FTS5 | ✅ | facts/decisions/goals/hypotheses + adaptive-BM25 |
 | 4 — Capability-checked query API | ✅ | Explain + AsOf bi-temporal lookup |
-| 4.5 — Benchmarks | ✅ | Full LoCoMo harness: hybrid retrieval, GitHub-Models runner, resume/CSV/MD |
+| 4.5 — Benchmarks | ✅ | Full LoCoMo harness: hybrid retrieval, GitHub-Models runner, Mem0-aligned judge, resume/CSV/MD. **82.3% Mem0-comparable (cat 1–4), gpt-4o-mini** |
 | 5 — Distillation | ✅ | `IDistiller` (read) + `ISessionDistiller` (ingest) |
 | 6 — Entity resolution | ✅ | 3-tier (UUID5 / cosine ≥0.95 / LLM-propose) |
 | 7 — Outcome closure | ✅ | `DecisionChainsProjector` + `FeedbackLearner` |

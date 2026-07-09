@@ -524,3 +524,34 @@ to use the KG. `SubjectTripleResolver` additionally binds triple subjects to
 canonical entity ids (Phase-6) for alias unification. Recommended host recipe:
 distill statements + triples in separate passes, then query with
 `SupplementSubjectTriples: true`.
+
+### Experiment 9 — Mem0-aligned measurement (final headline). **82.3% Mem0-comparable.**
+
+Root-caused the apparent gap to Mem0's 92.5 by reading Mem0's own public
+benchmark suite (mem0ai/memory-benchmarks, Apache 2.0). Two measurement choices
+account for most of it: (1) **Mem0 excludes adversarial (category 5) entirely**
+(`CATEGORIES_TO_EVALUATE = [1,2,3,4]`) — we had been grinding the one category
+they don't score; (2) Mem0 uses a **lenient J-score judge** (partial credit,
+paraphrase/date/duration tolerance, semantic overlap, same-referent). Both are
+now mirrored: `MemAlignedJudge` (`--judge mem0`, own wording, NOTICE-attributed)
+and a "Mem0-comparable (cat 1–4)" report subtotal.
+
+Full-category run (497 Q across conv-26/30/41, two-pass distill + KG supplement,
+gpt-4o-mini answerer, mem0-aligned judge):
+
+| Category | n | correct | acc |
+|---|---:|---:|---:|
+| single-hop | 200 | 176 | 88.0% |
+| temporal | 90 | 73 | 81.1% |
+| multi-hop | 74 | 57 | 77.0% |
+| open-domain | 21 | 11 | 52.4% |
+| adversarial | 112 | 24 | 21.4% |
+| **Overall (all 5)** | **497** | **341** | **68.6%** |
+| **Mem0-comparable (cat 1–4)** | **385** | **317** | **82.3%** |
+
+**Headline: 82.3% on the Mem0-comparable scope** (vs their 92.5, gpt-4o-mini
+answerer + ~714 tokens/query vs their ~6,956). The remaining gap is largely
+answer-model strength (they use a stronger answerer + an elaborate 7-step
+anti-abstention answer prompt) and further retrieval tuning — not a measurement
+artifact anymore. Adversarial (21.4%) stays low but is out-of-scope for the
+Mem0 comparison; it remains Mneme's honest internal stress metric.
