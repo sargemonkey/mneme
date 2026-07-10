@@ -16,7 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Mneme\Mneme.csproj" />
-    <ProjectReference Include="..\Mneme.Contracts\Mneme.Contracts.csproj" />
+    <ProjectReference Include="..\Mneme.Contracts\Mneme.Contracts.csproj" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>

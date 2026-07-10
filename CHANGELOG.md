@@ -31,8 +31,11 @@ release notes.
 - ADR index (`docs/adr/`) and publishing runbook (`docs/PUBLISHING.md`).
 
 ### Packaging
-- Publishable packages: `Mneme.Contracts`, `Mneme`, `Mneme.Agents.AI`
-  (libraries), and `Mneme.Mcp` (a `dotnet tool`, command `mneme-mcp`).
+- Publishable packages: `Mneme` (library) and `Mneme.Agents.AI` (library), plus
+  `Mneme.Mcp` (a `dotnet tool`, command `mneme-mcp`).
+- `Mneme.Contracts` stays a separate csproj (BCL-only allowlist boundary) but its
+  assembly is **folded into the `Mneme` package** — customers install one
+  package for both contracts and implementation.
 - `Mneme.Cli`, `Mneme.Sidecar`, and the `Mneme.Studio*` apps are not packable.
 - Package version is centralized in `Directory.Build.props` and overridable
   from the release tag; every package embeds README, LICENSE, NOTICE, XML docs,
@@ -40,5 +43,5 @@ release notes.
 
 ### Notes
 - Pre-1.0 the public API may change between minor versions.
-- First planned release: `Mneme.Contracts` / `Mneme` / `Mneme.Agents.AI` /
-  `Mneme.Mcp` at `0.1.0-alpha`.
+- First planned release: `Mneme` / `Mneme.Agents.AI` / `Mneme.Mcp` at
+  `0.1.0-alpha`.

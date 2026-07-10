@@ -5,14 +5,10 @@
     <Title>Mneme.Contracts</Title>
     <Description>Interfaces and DTOs for Mneme — a chronological memory substrate for AI agents. Define IMemoryAgent (ingest), IMemoryQueryAPI (capability-checked queries), CaptureEvent, CapabilityToken.</Description>
     <PackageTags>memory;agent;ai;mcp;knowledge-graph;temporal;contracts</PackageTags>
-    <IsPackable>true</IsPackable>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!-- Kept as a separate csproj to enforce the BCL-only allowlist boundary,
+         but NOT shipped as a standalone package: its assembly is folded into the
+         Mneme package so customers install a single 'Mneme'. -->
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
-
-  <ItemGroup>
-    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
-    <None Include="..\..\LICENSE" Pack="true" PackagePath="\" />
-    <None Include="..\..\NOTICE" Pack="true" PackagePath="\" />
-  </ItemGroup>
 
 </Project>

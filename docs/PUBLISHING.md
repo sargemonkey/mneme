@@ -9,13 +9,15 @@ and creates a GitHub Release. See
 
 | Package | Kind | What it is |
 |---|---|---|
-| `Mneme.Contracts` | library | BCL-only interfaces + DTOs (the allowlist-safe contract surface). |
-| `Mneme` | library | The memory substrate implementation (SQLite-backed). Depends on `Mneme.Contracts`. |
-| `Mneme.Agents.AI` | library | Microsoft Agent Framework integration (`MnemeContextProvider`). |
+| `Mneme` | library | The memory substrate (SQLite-backed). **Bundles the `Mneme.Contracts` assembly** — a single install gives you both the contracts and the implementation. |
+| `Mneme.Agents.AI` | library | Microsoft Agent Framework integration (`MnemeContextProvider`). Optional add-on; depends on `Mneme` + a preview MAF package. |
 | `Mneme.Mcp` | **.NET tool** | MCP server, installable via `dotnet tool install -g Mneme.Mcp` → `mneme-mcp`. |
 
-`Mneme.Cli`, `Mneme.Sidecar`, `Mneme.Studio*`, tests, benchmarks, and samples are
-intentionally **not** packable.
+`Mneme.Contracts` is a **separate csproj** (to enforce its BCL-only allowlist
+boundary) but is **not** published standalone — its assembly is folded into the
+`Mneme` package via a `BuildOutputInPackage` target, so customers install one
+package. `Mneme.Cli`, `Mneme.Sidecar`, `Mneme.Studio*`, tests, benchmarks, and
+samples are intentionally not packable.
 
 Each package embeds `README.md` (rendered on nuget.org), `LICENSE` (Apache-2.0),
 `NOTICE`, XML docs, and a symbol package (`.snupkg`). Source Link is enabled.
@@ -78,10 +80,9 @@ dotnet tool uninstall -g Mneme.Mcp
 ## Consuming the published packages
 
 ```bash
-dotnet add package Mneme.Contracts --prerelease
-dotnet add package Mneme --prerelease
-dotnet add package Mneme.Agents.AI --prerelease
-dotnet tool install -g Mneme.Mcp --prerelease
+dotnet add package Mneme --prerelease            # core: memory store + contracts (Contracts folded in)
+dotnet add package Mneme.Agents.AI --prerelease  # optional: Microsoft Agent Framework integration
+dotnet tool install -g Mneme.Mcp --prerelease    # optional: MCP server tool (mneme-mcp)
 ```
 
 ## Notes

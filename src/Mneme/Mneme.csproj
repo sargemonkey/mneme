@@ -16,8 +16,29 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Mneme.Contracts\Mneme.Contracts.csproj" />
+    <ProjectReference Include="..\Mneme.Contracts\Mneme.Contracts.csproj" PrivateAssets="all" />
   </ItemGroup>
+
+  <!-- Fold the (non-packable) Mneme.Contracts assembly into this package so
+       customers install a single 'Mneme' package. The csproj boundary is kept
+       for the BCL-only allowlist enforcement; only the packaging is combined.
+       PrivateAssets="all" above suppresses a phantom Mneme.Contracts package
+       dependency; this target copies its dll + xml doc into lib/. -->
+  <PropertyGroup>
+    <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);IncludeContractsInPackage</TargetsForTfmSpecificBuildOutput>
+  </PropertyGroup>
+  <Target Name="IncludeContractsInPackage" DependsOnTargets="ResolveReferences">
+    <ItemGroup>
+      <BuildOutputInPackage Include="@(ReferenceCopyLocalPaths)"
+        Condition="'%(ReferenceCopyLocalPaths.ReferenceSourceTarget)' == 'ProjectReference'
+                   and '%(ReferenceCopyLocalPaths.NuGetPackageId)' == ''
+                   and ('%(ReferenceCopyLocalPaths.Extension)' == '.dll' or '%(ReferenceCopyLocalPaths.Extension)' == '.xml')" />
+      <!-- Ensure the Contracts XML doc rides along for IntelliSense even if it
+           isn't surfaced via ReferenceCopyLocalPaths on this SDK. -->
+      <BuildOutputInPackage Include="$(OutputPath)Mneme.Contracts.xml"
+        Condition="Exists('$(OutputPath)Mneme.Contracts.xml')" />
+    </ItemGroup>
+  </Target>
 
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
