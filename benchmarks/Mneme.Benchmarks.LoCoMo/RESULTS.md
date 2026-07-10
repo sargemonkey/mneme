@@ -17,18 +17,38 @@ supplement.
 
 ---
 
-## Headline
+## Headline — apples-to-apples vs Mem0
 
-| Configuration | Answerer | Retrieval depth | Tokens/query | LoCoMo cat 1–4 (Mem0-comparable) | All-5 overall |
+Tight like-for-like: **same answerer+judge model (gpt-4o), same retrieval depth
+(top-200), same answer procedure, same lenient J-score judge, same category scope
+(LoCoMo categories 1–4).** Full 10-conversation set (1,540 in-scope questions).
+
+| System | LoCoMo cat 1–4 | Answerer | Retrieval depth | Tokens/query |
+|---|---:|---|---:|---:|
+| **Mneme** | **89.6%** | gpt-4o | top-200 | ~6,254 |
+| Mem0 (reported) | 92.5% | gpt-4o | top-200 | ~6,956 |
+
+Mneme lands **within ~3 points of Mem0** on a fully-matched configuration, at
+comparable retrieved context. The residual is plausibly within
+distiller-model + judge-noise margins (see caveats).
+
+> Everything below is **supplemental** — it deliberately changes one or more
+> variables away from the matched configuration (cheaper model, less context, or
+> the adversarial category Mem0 excludes), so it is **not** a like-for-like Mem0
+> comparison. It is reported for transparency and to characterize Mneme across
+> operating points.
+
+### Supplemental — other operating points (NOT apples-to-apples)
+
+| Configuration | Answerer | Depth | Tokens/q | cat 1–4 | all-5 (incl. adversarial) |
 |---|---|---:|---:|---:|---:|
-| **Full match** (parity) | gpt-4o | top-200 | ~6,254 | **89.6%** | 73.4% |
-| **Efficient** | gpt-4o-mini | top-25 | **~724** | 80.3% | 68.8% |
-| Mem0 (reported) | gpt-4o | top-200 | ~6,956 | 92.5% | — |
+| Parity (matched, from above) | gpt-4o | 200 | ~6,254 | 89.6% | 73.4% |
+| Efficient | gpt-4o-mini | 25 | **~724** | 80.3% | 68.8% |
 
-Both Mneme rows are the **full 10-conversation** LoCoMo-10 set (1,986 questions).
-In the fully-matched configuration Mneme scores **89.6% vs Mem0's reported
-92.5% — within ~3 points on 1,540 in-scope questions**, at comparable retrieved
-context. The efficient configuration reaches **80.3% at ~9× less context**.
+- **Efficient** trades ~9pp of in-scope accuracy for **~9× less retrieved
+  context** — a distinct, legitimate cost/latency operating point.
+- **all-5** adds the adversarial category, which **Mem0 does not score**; see the
+  adversarial caveat for why deeper retrieval *lowers* that column.
 
 ---
 

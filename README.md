@@ -169,29 +169,29 @@ for the design walkthrough.
 
 ## LoCoMo benchmark (apples-to-apples)
 
-Measured with Mem0's own methodology — same answerer+judge model, same
-retrieval depth, same answer procedure, same lenient J-score judge, and same
-category scope (categories 1–4; Mem0 excludes adversarial) — so the comparison
-is genuinely like-for-like. See
-[`benchmarks/Mneme.Benchmarks.LoCoMo/ANALYSIS.md`](benchmarks/Mneme.Benchmarks.LoCoMo/ANALYSIS.md)
-(Experiments 9–11) for the full methodology, per-category tables, and the
-step-by-step alignment ladder.
+Tight like-for-like vs Mem0 — **same answerer+judge model (gpt-4o), same
+retrieval depth (top-200), same answer procedure, same lenient J-score judge,
+same category scope (LoCoMo cat 1–4)**. Full 10-conversation set (1,540 in-scope
+questions).
 
-| System | LoCoMo (cat 1–4) | Answerer | Tokens / query |
-|---|---:|---|---:|
-| **Mneme** (full match) | **89.6%** | gpt-4o | ~6,254 |
-| Mem0 (reported) | 92.5% | gpt-4o | ~6,956 |
-| **Mneme** (efficient) | **80.3%** | gpt-4o-mini | **~724** |
+| System | LoCoMo (cat 1–4) | Answerer | Retrieval depth | Tokens / query |
+|---|---:|---|---:|---:|
+| **Mneme** | **89.6%** | gpt-4o | top-200 | ~6,254 |
+| Mem0 (reported) | 92.5% | gpt-4o | top-200 | ~6,956 |
 
-Full **10-conversation** LoCoMo-10 (1,986 questions). With every controllable
-variable matched (model, retrieval depth, answer procedure, judge, scope), Mneme
-reaches **89.6% — within ~3pp of Mem0's reported 92.5%** on the full
-1,540-question in-scope set, at comparable context. An efficiency variant hits
-**80.3% with gpt-4o-mini at ~9× less retrieved context**. Almost the entire
-apparent gap to Mem0 was measurement + configuration (scope, judge, answer
-prompt, model, retrieval depth), not memory-layer capability. Per-category
-(full match): single-hop 91.4%, temporal 90.3%, multi-hop 88.3%, open-domain
-75.0%. Full methodology, both variants, the alignment ladder, and caveats:
+Mneme lands **within ~3pp of Mem0** on a fully-matched configuration, at
+comparable retrieved context — the residual is plausibly within
+distiller-model + judge-noise margins. Per-category (parity): single-hop 91.4%,
+temporal 90.3%, multi-hop 88.3%, open-domain 75.0%. Almost the entire *apparent*
+gap to Mem0 turned out to be measurement + configuration (scope, judge, answer
+prompt, model, retrieval depth), not memory-layer capability.
+
+**Supplemental (not apples-to-apples):** an efficiency configuration
+(gpt-4o-mini, top-25) reaches **80.3% at ~9× less retrieved context (~724
+tokens/query)**; and Mneme separately reports the **adversarial** category that
+Mem0 excludes from scoring (where deeper retrieval trades attribution precision
+for recall). Full methodology, both operating points, the alignment ladder, and
+caveats:
 [`benchmarks/Mneme.Benchmarks.LoCoMo/RESULTS.md`](benchmarks/Mneme.Benchmarks.LoCoMo/RESULTS.md).
 
 ## Background reading
