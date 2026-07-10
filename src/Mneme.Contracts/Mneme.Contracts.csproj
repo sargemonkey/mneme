@@ -5,8 +5,8 @@
     <Title>Mneme.Contracts</Title>
     <Description>Interfaces and DTOs for Mneme — a chronological memory substrate for AI agents. Define IMemoryAgent (ingest), IMemoryQueryAPI (capability-checked queries), CaptureEvent, CapabilityToken.</Description>
     <PackageTags>memory;agent;ai;mcp;knowledge-graph;temporal;contracts</PackageTags>
-    <Version>0.0.1-alpha.1</Version>
     <IsPackable>true</IsPackable>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
   <ItemGroup>

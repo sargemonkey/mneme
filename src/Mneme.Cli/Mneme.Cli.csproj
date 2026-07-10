@@ -4,8 +4,8 @@
     <PackageId>Mneme.Cli</PackageId>
     <Title>Mneme.Cli</Title>
     <Description>Command-line interface for Mneme — used by the Electron Studio for curation, revocation, and ingest operations so the desktop UI stays a pure renderer with all mutation logic in canonical C#.</Description>
-    <Version>0.0.1-alpha.1</Version>
-    <IsPackable>true</IsPackable>
+    <!-- Internal helper invoked by the Electron Studio; not a published package. -->
+    <IsPackable>false</IsPackable>
     <OutputType>Exe</OutputType>
   </PropertyGroup>
 

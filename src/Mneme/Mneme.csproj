@@ -5,8 +5,8 @@
     <Title>Mneme</Title>
     <Description>A local-first, .NET-native chronological memory substrate for AI agents. Bi-temporal knowledge graph with epistemic categories (Evidence, Facts, Decisions, Hypotheses, Goals), LLM-powered distillation, workstream isolation, and conservative entity resolution. SQLite-backed.</Description>
     <PackageTags>memory;agent;ai;knowledge-graph;temporal;sqlite;distillation;rag</PackageTags>
-    <Version>0.0.1-alpha.1</Version>
     <IsPackable>true</IsPackable>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
   <ItemGroup>

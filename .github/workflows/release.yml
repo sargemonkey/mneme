@@ -1,0 +1,111 @@
+name: Release
+
+# Publishes the Mneme NuGet packages when a version tag is pushed (e.g. v0.1.0
+# or v0.1.0-alpha.1). The tag's version (without the leading "v") overrides the
+# csproj <Version>, so the tag is the single source of truth for a release.
+#
+# Requires a repository secret NUGET_API_KEY with push rights on nuget.org for
+# the Mneme* package ids.
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to pack (e.g. 0.1.0-alpha.1). Overrides csproj <Version>."
+        required: true
+        type: string
+      dry_run:
+        description: "Pack only; do not push to NuGet."
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Pack & Publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Derive version
+        id: ver
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            # strip refs/tags/v prefix
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Releasing version: $VERSION"
+
+      - name: Restore
+        run: dotnet restore Mneme.slnx
+
+      - name: Build
+        run: dotnet build Mneme.slnx --configuration Release --no-restore -p:Version=${{ steps.ver.outputs.version }} -p:ContinuousIntegrationBuild=true
+
+      - name: Test
+        run: dotnet test Mneme.slnx --configuration Release --no-build --verbosity normal
+
+      - name: Pack
+        run: >
+          dotnet pack Mneme.slnx --configuration Release --no-build
+          -p:Version=${{ steps.ver.outputs.version }}
+          -p:ContinuousIntegrationBuild=true
+          --output ${{ github.workspace }}/artifacts
+
+      - name: List packages
+        run: ls -la ${{ github.workspace }}/artifacts
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkg
+          path: |
+            ${{ github.workspace }}/artifacts/*.nupkg
+            ${{ github.workspace }}/artifacts/*.snupkg
+
+      - name: Push to NuGet
+        # Skip on a workflow_dispatch dry-run; always push on a tag.
+        if: ${{ github.event_name == 'push' || inputs.dry_run == false }}
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.NUGET_API_KEY }}" ]; then
+            echo "::error::NUGET_API_KEY secret is not set — cannot push."
+            exit 1
+          fi
+          dotnet nuget push "${{ github.workspace }}/artifacts/*.nupkg" \
+            --api-key "${{ secrets.NUGET_API_KEY }}" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
+      - name: Create GitHub Release
+        if: ${{ github.event_name == 'push' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            ${{ github.workspace }}/artifacts/*.nupkg
+            ${{ github.workspace }}/artifacts/*.snupkg
