@@ -639,3 +639,29 @@ Notes:
 
 Almost the entire original gap was **measurement + configuration** (scope, judge,
 answer prompt, model, retrieval depth), not memory-layer capability.
+
+### Experiment 12 — full 10-conversation runs (publishable). **Parity 89.6%, efficient 80.3%.**
+
+Ran BOTH configs on the complete LoCoMo-10 set (1,986 Q, all 10 conversations),
+with all 10 workstreams two-pass-distilled (statements + separate triples).
+(Note: an initial full-10 attempt reused stale pre-two-pass DBs for conv-42+;
+those contaminated results were discarded and the 7 conversations re-distilled
+before these numbers.)
+
+| Config | answerer | k | tokens/q | single | temporal | multi-hop | open | adversarial | **cat 1–4** | all-5 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| efficient | gpt-4o-mini | 25 | 724 | 86.4 | 72.6 | 78.0 | 59.4 | 29.1 | **80.3** | 68.8 |
+| **parity** | **gpt-4o** | **200** | **6254** | **91.4** | **90.3** | **88.3** | **75.0** | **17.5** | **89.6** | **73.4** |
+| Mem0 (reported) | gpt-4o | 200 | ~6956 | — | — | — | — | (excluded) | **92.5** | — |
+
+**Full-10 parity: 89.6% vs Mem0's 92.5% — within ~3pp on the full 1,540-question
+in-scope set, at comparable context.** The residual is plausibly the distiller
+model (these DBs were distilled with gpt-4o-mini even in the parity run) + judge
+noise. The efficient config answers ~80% of in-scope questions at ~9× less
+retrieved context.
+
+Confirmed the recall-depth vs attribution trade-off at scale: **adversarial
+29.1% @ k=25 → 17.5% @ k=200** — deeper retrieval floods the KG-suppressed
+distractors back in. Out of Mem0's scope, but a real, documented tension.
+
+Publishable summary lives in `benchmarks/Mneme.Benchmarks.LoCoMo/RESULTS.md`.

@@ -152,7 +152,7 @@ for the design walkthrough.
 | 2 — Classification + revocation | ✅ | `AddMneme(opts=>{})` DI helper |
 | 3 — Projections + FTS5 | ✅ | facts/decisions/goals/hypotheses + adaptive-BM25 |
 | 4 — Capability-checked query API | ✅ | Explain + AsOf bi-temporal lookup |
-| 4.5 — Benchmarks | ✅ | Full LoCoMo harness: hybrid retrieval, GitHub-Models runner, Mem0-aligned answerer+judge+scope, resume/CSV/MD. **83.6% Mem0-comparable (cat 1–4), gpt-4o-mini, ~715 tok/query** |
+| 4.5 — Benchmarks | ✅ | Full LoCoMo-10 harness (1,986 Q): hybrid retrieval, GitHub-Models runner, Mem0-aligned answerer+judge+scope, resume/CSV/MD. **89.6% Mem0-comparable (gpt-4o, parity) / 80.3% (gpt-4o-mini, ~9× less context)** |
 | 5 — Distillation | ✅ | `IDistiller` (read) + `ISessionDistiller` (ingest) |
 | 6 — Entity resolution | ✅ | 3-tier (UUID5 / cosine ≥0.95 / LLM-propose) |
 | 7 — Outcome closure | ✅ | `DecisionChainsProjector` + `FeedbackLearner` |
@@ -179,19 +179,20 @@ step-by-step alignment ladder.
 
 | System | LoCoMo (cat 1–4) | Answerer | Tokens / query |
 |---|---:|---|---:|
-| **Mneme** (full match) | **90.4%** | gpt-4o | ~6,297 |
+| **Mneme** (full match) | **89.6%** | gpt-4o | ~6,254 |
 | Mem0 (reported) | 92.5% | gpt-4o | ~6,956 |
-| **Mneme** (efficient) | **83.6%** | gpt-4o-mini | **~715** |
+| **Mneme** (efficient) | **80.3%** | gpt-4o-mini | **~724** |
 
-With every controllable variable matched (model, retrieval depth, answer
-procedure, judge, scope), Mneme reaches **90.4% — statistical parity with Mem0's
-92.5%** (within ~2pp on n=385) at comparable context. An efficiency variant hits
-**83.6% with gpt-4o-mini at ~9× less retrieved context**. Almost the entire
+Full **10-conversation** LoCoMo-10 (1,986 questions). With every controllable
+variable matched (model, retrieval depth, answer procedure, judge, scope), Mneme
+reaches **89.6% — within ~3pp of Mem0's reported 92.5%** on the full
+1,540-question in-scope set, at comparable context. An efficiency variant hits
+**80.3% with gpt-4o-mini at ~9× less retrieved context**. Almost the entire
 apparent gap to Mem0 was measurement + configuration (scope, judge, answer
-prompt, model, retrieval depth), not memory-layer capability. Per-category (full
-match): temporal 95.6%, multi-hop 91.9%, single-hop 88.5%, open-domain 81.0%.
-*(3-conversation subset; harness is deterministic + resumable, full 10-conversation
-run pending.)*
+prompt, model, retrieval depth), not memory-layer capability. Per-category
+(full match): single-hop 91.4%, temporal 90.3%, multi-hop 88.3%, open-domain
+75.0%. Full methodology, both variants, the alignment ladder, and caveats:
+[`benchmarks/Mneme.Benchmarks.LoCoMo/RESULTS.md`](benchmarks/Mneme.Benchmarks.LoCoMo/RESULTS.md).
 
 ## Background reading
 

@@ -21,13 +21,14 @@ supplement.
 
 | Configuration | Answerer | Retrieval depth | Tokens/query | LoCoMo cat 1–4 (Mem0-comparable) | All-5 overall |
 |---|---|---:|---:|---:|---:|
-| **Full match** (parity) | gpt-4o | top-200 | ~6,300 | **_(parity run in progress)_** | _(pending)_ |
-| **Efficient** | gpt-4o-mini | top-25 | **~724** | **80.3%** | 68.8% |
+| **Full match** (parity) | gpt-4o | top-200 | ~6,254 | **89.6%** | 73.4% |
+| **Efficient** | gpt-4o-mini | top-25 | **~724** | 80.3% | 68.8% |
 | Mem0 (reported) | gpt-4o | top-200 | ~6,956 | 92.5% | — |
 
-*(3-conversation subset earlier measured 90.4% in the full-match config; the
-full 10-conversation parity number is being measured now and will replace the
-placeholder above.)*
+Both Mneme rows are the **full 10-conversation** LoCoMo-10 set (1,986 questions).
+In the fully-matched configuration Mneme scores **89.6% vs Mem0's reported
+92.5% — within ~3 points on 1,540 in-scope questions**, at comparable retrieved
+context. The efficient configuration reaches **80.3% at ~9× less context**.
 
 ---
 
@@ -90,46 +91,65 @@ questions matter even if the standard comparison omits them.
 
 ## Full-match run — parity (gpt-4o, top-200, all 10 conversations)
 
-_(Running now — this section will be filled with the per-category table when the
-run completes. Config: gpt-4o answerer + judge, top-200 retrieval, same
-two-pass-distilled DBs, Mem0-aligned answer procedure + judge, LoCoMo cat 1–4
-scope. Earlier 3-conversation measurement in this config: 90.4% Mem0-comparable,
-~6,297 tokens/query — vs Mem0's reported 92.5% at ~6,956 tokens.)_
+- **Answerer / judge:** `gpt-4o` (GitHub Models), Mem0-aligned answer procedure +
+  Mem0-aligned lenient judge.
+- **Retrieval:** hybrid semantic (`text-embedding-3-small`) + BM25, top-200,
+  date-stamped snippets, KG subject-triple answer-context supplement.
+- **Mean context:** ~6,254 tokens/query (comparable to Mem0's ~6,956).
+
+| Category | n | correct | accuracy | in Mem0 scope? |
+|---|---:|---:|---:|:---:|
+| single-hop | 841 | 769 | **91.4%** | ✅ |
+| temporal | 321 | 290 | **90.3%** | ✅ |
+| multi-hop | 282 | 249 | **88.3%** | ✅ |
+| open-domain | 96 | 72 | **75.0%** | ✅ |
+| adversarial | 446 | 78 | 17.5% | ❌ (excluded by Mem0) |
+| **Mem0-comparable (1–4)** | **1,540** | **1,380** | **89.6%** | — |
+| **All-5 overall** | **1,986** | **1,458** | **73.4%** | — |
+
+**89.6% vs Mem0's reported 92.5%** — within ~3pp on the full 1,540-question
+in-scope set, at comparable retrieved context. Every controllable variable is
+matched: answerer+judge model, retrieval depth, answer procedure, judge
+leniency, and category scope.
 
 ---
 
 ## The alignment ladder — how the apparent "35% vs 92.5%" gap dissolved
 
 Each row adds one alignment step to the *same memory layer*; only the
-measurement/configuration changes.
+measurement/configuration changes. Full-10 rows are the complete 1,986-question
+set; subset rows are marked.
 
 | Step | Mem0-comparable |
 |---|---:|
-| strict judge, all-5 categories, gpt-4o-mini, top-25 | ~35% |
-| + exclude adversarial (Mem0's scope) | ~53% |
-| + lenient J-score judge (Mem0's grader) | 82.3%* |
-| + Mem0's multi-step answer procedure | 83.6%* |
-| + gpt-4o answerer + top-200 retrieval | 90.4%* |
+| strict judge, all-5 categories, gpt-4o-mini, top-25 | ~35%† |
+| + exclude adversarial (Mem0's scope) | ~53%† |
+| + lenient J-score judge (Mem0's grader) | 82.3%† |
+| + Mem0's multi-step answer procedure | 83.6%† |
+| **full-10 efficient** (gpt-4o-mini, top-25) | **80.3%** |
+| **full-10 parity** (gpt-4o, top-200) | **89.6%** |
 | Mem0 (reported) | 92.5% |
 
-*Measured on the 3-conversation subset; the full-10 efficient number is 80.3%
-(gpt-4o-mini/top-25) and the full-10 parity number is in progress.
+†Measured on a 3-conversation subset during iterative development; the two
+**bold** rows are the full 10-conversation results.
 
 **Takeaway:** almost the entire original gap to Mem0 was measurement +
 configuration (category scope, judge leniency, answer prompt, answerer model,
-retrieval depth) — *not* memory-layer capability. On a like-for-like comparison
-Mneme is competitive, and at the efficient operating point it reaches ~80% of
-the in-scope questions at roughly one-tenth the retrieved-context cost.
+retrieval depth) — *not* memory-layer capability. Fully matched, Mneme lands at
+89.6% vs Mem0's 92.5% (~3pp, likely within distiller-model + judge-noise
+margins). At the efficient operating point it answers ~80% of in-scope questions
+at roughly one-tenth the retrieved-context cost.
 
 ---
 
 ## Caveats (stated honestly)
 
 - **Adversarial vs recall depth.** Adversarial accuracy *drops* as retrieval
-  depth grows (flooding the context with 200 memories reintroduces the
-  attribution distractors the KG supplement suppresses at small k). It is out of
-  the Mem0-comparable scope, but the tension between recall depth and
-  attribution precision is real and documented, not a bug.
+  depth grows — full-10 measured **29.1% at top-25 but 17.5% at top-200** —
+  because flooding the context with 200 memories reintroduces the attribution
+  distractors the KG supplement suppresses at small k. It is out of the
+  Mem0-comparable scope, but the tension between recall depth and attribution
+  precision is real and documented, not a bug.
 - **Distiller model.** These DBs were distilled with `gpt-4o-mini` even in the
   full-match run (only the answerer + judge are gpt-4o). Re-distilling with
   gpt-4o could close a residual point or two; it is not the dominant variable.
