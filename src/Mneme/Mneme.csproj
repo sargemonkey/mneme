@@ -11,6 +11,11 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
+    <!-- Override the transitive SQLitePCLRaw 2.1.6 (SQLite < 3.50.2, CVE-2025-6965 /
+         GHSA-2m69-gcr7-jv3q, vulnerable range <= 2.1.11) with the 3.x bundle, which
+         ships patched SQLite and is out of the advisory range. Kept on the 8.x line
+         of Microsoft.Data.Sqlite to stay net8-friendly. -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
     <PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="9.7.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
   </ItemGroup>

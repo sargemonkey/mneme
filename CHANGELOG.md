@@ -30,6 +30,15 @@ release notes.
   **release workflow** (`release.yml`) that packs + pushes to nuget.org.
 - ADR index (`docs/adr/`) and publishing runbook (`docs/PUBLISHING.md`).
 
+### Security
+- Override the transitive `SQLitePCLRaw` stack (pulled by `Microsoft.Data.Sqlite`)
+  to `bundle_e_sqlite3` **3.0.3**, which ships patched SQLite **3.50.4** and is
+  out of the vulnerable range of **CVE-2025-6965** / GHSA-2m69-gcr7-jv3q
+  (`SQLitePCLRaw.lib.e_sqlite3 <= 2.1.11`, high severity). Clears the NU1903
+  audit warning for downstream consumers and fixes the underlying native SQLite
+  memory-corruption risk while staying on the net8-friendly 8.x line of
+  `Microsoft.Data.Sqlite`.
+
 ### Packaging
 - Publishable packages: `Mneme` (library) and `Mneme.Agents.AI` (library), plus
   `Mneme.Mcp` (a `dotnet tool`, command `mneme-mcp`).
