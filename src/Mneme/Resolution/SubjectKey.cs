@@ -38,11 +38,12 @@ public static partial class SubjectKey
     {
         if (string.IsNullOrWhiteSpace(freeText)) return Array.Empty<string>();
         var keys = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (Match m in ProperNounRegex().Matches(freeText))
         {
             if (QueryStop.Contains(m.Value)) continue;
             var k = Normalize(m.Value);
-            if (k.Length > 0 && !keys.Contains(k)) keys.Add(k);
+            if (k.Length > 0 && seen.Add(k)) keys.Add(k);
         }
         return keys;
     }

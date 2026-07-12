@@ -8,19 +8,26 @@ the way it does.
 
 ## 1. Install
 
-Mneme targets **.NET 8**. From a project that needs memory:
+Mneme targets **.NET 8+**. One package gives you the memory store — the
+BCL-only `Mneme.Contracts` surface is bundled in:
 
 ```pwsh
-# (Pre-1.0: no NuGet feed yet — reference the projects directly.)
-dotnet add reference path/to/mneme/src/Mneme.Contracts/Mneme.Contracts.csproj
-dotnet add reference path/to/mneme/src/Mneme/Mneme.csproj
-# optional integrations:
-dotnet add reference path/to/mneme/src/Mneme.Agents.AI/Mneme.Agents.AI.csproj
-dotnet add reference path/to/mneme/src/Mneme.Mcp/Mneme.Mcp.csproj
+dotnet add package Mneme --prerelease
 ```
 
-When 1.0 ships, the NuGet IDs will be `Mneme.Contracts`, `Mneme`,
-`Mneme.Agents.AI`, `Mneme.Mcp`, `Mneme.Sidecar`.
+Optional integrations:
+
+```pwsh
+dotnet add package Mneme.Agents.AI --prerelease   # Microsoft Agent Framework
+dotnet tool install -g Mneme.Mcp --prerelease     # MCP server tool (mneme-mcp)
+```
+
+Building against a local checkout instead? Reference the projects directly:
+
+```pwsh
+dotnet add reference path/to/mneme/src/Mneme/Mneme.csproj
+dotnet add reference path/to/mneme/src/Mneme.Agents.AI/Mneme.Agents.AI.csproj  # optional
+```
 
 ---
 

@@ -125,12 +125,15 @@ public static class Program
 
 internal sealed class BearerAuth : IEndpointFilter
 {
-    private readonly string _expected;
-    public BearerAuth(string expected) { _expected = "Bearer " + expected; }
+    private readonly byte[] _expected;
+    public BearerAuth(string expected) =>
+        _expected = System.Text.Encoding.UTF8.GetBytes("Bearer " + expected);
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
-        var auth = context.HttpContext.Request.Headers.Authorization.ToString();
-        if (!string.Equals(auth, _expected, StringComparison.Ordinal))
+        var auth = System.Text.Encoding.UTF8.GetBytes(context.HttpContext.Request.Headers.Authorization.ToString());
+        // Fixed-time comparison so response latency doesn't leak how many leading
+        // bytes of the bearer token matched (timing side-channel on the auth path).
+        if (!System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(auth, _expected))
         {
             return Results.Json(new { error = "unauthorized" }, statusCode: 401);
         }

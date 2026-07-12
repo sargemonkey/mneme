@@ -388,43 +388,34 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
         var raw = _search.Search(workstream, spec.FreeText!, limit);
 
         // Enrich each FTS hit with bi-temporal + revocation + capability checks.
+        // Batch-load all hit rows once, then gate in-memory (no per-hit SELECT).
         using var c = _connections.Open();
+        var rows = LoadEventRows(c, raw.Select(h => h.EventId.Value));
         var items = new List<QueryResultItem>(raw.Count);
         var gated = 0;
         foreach (var hit in raw)
         {
-            using var lookup = c.CreateCommand();
-            lookup.CommandText = """
-                SELECT e.workstream_id, e.category, e.valid_at, e.created_at, e.payload_json,
-                       e.event_channel, e.invalid_at, r.revoked_at
-                FROM memory_events e
-                LEFT JOIN memory_revocations r ON r.event_id = e.event_id
-                WHERE e.event_id = $id;
-                """;
-            lookup.Parameters.AddWithValue("$id", hit.EventId.Value);
-            using var rd = lookup.ExecuteReader();
-            if (!rd.Read()) { gated++; continue; }
-            var ws = rd.GetString(0);
-            if (ws != workstream) { gated++; continue; }
-            var category = (EpistemicCategory)rd.GetInt32(1);
+            if (!rows.TryGetValue(hit.EventId.Value, out var row)) { gated++; continue; }
+            if (row.Workstream != workstream) { gated++; continue; }
+            var category = (EpistemicCategory)row.Category;
             if (!resolved.EffectiveCategories.Contains(category)) { gated++; continue; }
-            var channel = (EventChannel)rd.GetInt32(5);
+            var channel = (EventChannel)row.Channel;
             if (channel != spec.Channel) { gated++; continue; }
-            if (!rd.IsDBNull(7)) { gated++; continue; } // revoked
-            var validAt = DateTimeOffset.Parse(rd.GetString(2), System.Globalization.CultureInfo.InvariantCulture);
-            var recordedAt = DateTimeOffset.Parse(rd.GetString(3), System.Globalization.CultureInfo.InvariantCulture);
+            if (row.RevokedAt is not null) { gated++; continue; } // revoked
+            var validAt = DateTimeOffset.Parse(row.ValidAt, System.Globalization.CultureInfo.InvariantCulture);
+            var recordedAt = DateTimeOffset.Parse(row.CreatedAt, System.Globalization.CultureInfo.InvariantCulture);
             if (spec.From is { } fromBound && validAt < fromBound) { gated++; continue; }
             if (spec.To   is { } toBound   && validAt > toBound)   { gated++; continue; }
             if (spec.AsOf is { } asOf)
             {
                 if (recordedAt > asOf) { gated++; continue; }
-                if (!rd.IsDBNull(6))
+                if (row.InvalidAt is { } invStr)
                 {
-                    var inv = DateTimeOffset.Parse(rd.GetString(6), System.Globalization.CultureInfo.InvariantCulture);
+                    var inv = DateTimeOffset.Parse(invStr, System.Globalization.CultureInfo.InvariantCulture);
                     if (inv <= asOf) { gated++; continue; }
                 }
             }
-            var payload = Storage.EventSerialization.DeserializePayload(rd.GetString(4));
+            var payload = Storage.EventSerialization.DeserializePayload(row.PayloadJson);
 
             const double curationMult = 1.0;
             var passedGate = hit.NormalizedBm25 >= SemanticThreshold;
@@ -500,6 +491,9 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
         fused.Sort(static (a, b) => b.Final.CompareTo(a.Final));
 
         using var c = _connections.Open();
+        // Batch-load candidate rows once; gate in-memory instead of one SELECT
+        // per candidate. The fused list stays the ordering/limit source of truth.
+        var rows = LoadEventRows(c, fused.Select(f => f.EventId));
         var items = new List<QueryResultItem>(limit);
         var gated = 0;
         foreach (var cand in fused)
@@ -507,37 +501,27 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
             if (items.Count >= limit) break;
             if (cand.Fused < SemanticThreshold) { gated++; continue; }
 
-            using var lookup = c.CreateCommand();
-            lookup.CommandText = """
-                SELECT e.category, e.valid_at, e.created_at, e.payload_json,
-                       e.event_channel, e.invalid_at, r.revoked_at
-                FROM memory_events e
-                LEFT JOIN memory_revocations r ON r.event_id = e.event_id
-                WHERE e.event_id = $id AND e.workstream_id = $ws;
-                """;
-            lookup.Parameters.AddWithValue("$id", cand.EventId);
-            lookup.Parameters.AddWithValue("$ws", workstream.Value);
-            using var rd = lookup.ExecuteReader();
-            if (!rd.Read()) { gated++; continue; }
-            var category = (EpistemicCategory)rd.GetInt32(0);
+            if (!rows.TryGetValue(cand.EventId, out var row)) { gated++; continue; }
+            if (row.Workstream != workstream.Value) { gated++; continue; }
+            var category = (EpistemicCategory)row.Category;
             if (!resolved.EffectiveCategories.Contains(category)) { gated++; continue; }
-            var channel = (EventChannel)rd.GetInt32(4);
+            var channel = (EventChannel)row.Channel;
             if (channel != spec.Channel) { gated++; continue; }
-            if (!rd.IsDBNull(6)) { gated++; continue; } // revoked
-            var validAt = DateTimeOffset.Parse(rd.GetString(1), System.Globalization.CultureInfo.InvariantCulture);
-            var recordedAt = DateTimeOffset.Parse(rd.GetString(2), System.Globalization.CultureInfo.InvariantCulture);
+            if (row.RevokedAt is not null) { gated++; continue; } // revoked
+            var validAt = DateTimeOffset.Parse(row.ValidAt, System.Globalization.CultureInfo.InvariantCulture);
+            var recordedAt = DateTimeOffset.Parse(row.CreatedAt, System.Globalization.CultureInfo.InvariantCulture);
             if (spec.From is { } fromBound && validAt < fromBound) { gated++; continue; }
             if (spec.To   is { } toBound   && validAt > toBound)   { gated++; continue; }
             if (spec.AsOf is { } asOf)
             {
                 if (recordedAt > asOf) { gated++; continue; }
-                if (!rd.IsDBNull(5))
+                if (row.InvalidAt is { } invStr)
                 {
-                    var inv = DateTimeOffset.Parse(rd.GetString(5), System.Globalization.CultureInfo.InvariantCulture);
+                    var inv = DateTimeOffset.Parse(invStr, System.Globalization.CultureInfo.InvariantCulture);
                     if (inv <= asOf) { gated++; continue; }
                 }
             }
-            var payload = Storage.EventSerialization.DeserializePayload(rd.GetString(3));
+            var payload = Storage.EventSerialization.DeserializePayload(row.PayloadJson);
             const double curationMult = 1.0;
             var details = explain
                 ? new ScoreDetails(
@@ -568,6 +552,39 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
     // Returned as an append-only list (QueryResult.SubjectTriples) so a consumer
     // can add the queried person's attributed facts alongside the ranked items
     // without displacing them. Ordered most-recent-first; excludes revoked triples.
+    // Batch-load event rows for a set of ids in a single query (keyed by event
+    // id) so a candidate loop can gate in-memory instead of issuing one SELECT
+    // per candidate. Columns match what the retrieval gating needs.
+    private readonly record struct EventRow(
+        string Workstream, int Category, string ValidAt, string CreatedAt,
+        string PayloadJson, int Channel, string? InvalidAt, string? RevokedAt);
+
+    private Dictionary<string, EventRow> LoadEventRows(SqliteConnection c, IEnumerable<string> eventIds)
+    {
+        var ids = eventIds.Distinct(StringComparer.Ordinal).ToArray();
+        var map = new Dictionary<string, EventRow>(ids.Length, StringComparer.Ordinal);
+        if (ids.Length == 0) return map;
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = """
+            SELECT e.event_id, e.workstream_id, e.category, e.valid_at, e.created_at,
+                   e.payload_json, e.event_channel, e.invalid_at, r.revoked_at
+            FROM memory_events e
+            LEFT JOIN memory_revocations r ON r.event_id = e.event_id
+            WHERE e.event_id IN (SELECT value FROM json_each($ids));
+            """;
+        cmd.Parameters.AddWithValue("$ids", System.Text.Json.JsonSerializer.Serialize(ids));
+        using var rd = cmd.ExecuteReader();
+        while (rd.Read())
+        {
+            map[rd.GetString(0)] = new EventRow(
+                rd.GetString(1), rd.GetInt32(2), rd.GetString(3), rd.GetString(4),
+                rd.GetString(5), rd.GetInt32(6),
+                rd.IsDBNull(7) ? null : rd.GetString(7),
+                rd.IsDBNull(8) ? null : rd.GetString(8));
+        }
+        return map;
+    }
+
     private IReadOnlyList<SubjectTripleHit> LoadSubjectTripleSupplement(WorkstreamId workstream, string freeText, int limit)
     {
         var subjectKeys = SubjectKey.ExtractSubjects(freeText);
@@ -577,32 +594,29 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
         var hits = new List<SubjectTripleHit>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
         using var c = _connections.Open();
-        foreach (var key in subjectKeys)
+        using var cmd = c.CreateCommand();
+        // One query for all subject keys (OR-joined) instead of a query per key.
+        var ors = string.Join(" OR ", subjectKeys.Select((_, i) =>
+            $"(subject_key LIKE '%' || $k{i} || '%' OR $k{i} LIKE '%' || subject_key || '%')"));
+        cmd.CommandText = $"""
+            SELECT subject_text, predicate, object, valid_at, event_id
+            FROM projection_fact_triples
+            WHERE workstream_id = $ws AND revoked_at IS NULL AND ({ors})
+            ORDER BY valid_at DESC;
+            """;
+        cmd.Parameters.AddWithValue("$ws", workstream.Value);
+        for (var i = 0; i < subjectKeys.Count; i++) cmd.Parameters.AddWithValue($"$k{i}", subjectKeys[i]);
+        using var rd = cmd.ExecuteReader();
+        while (rd.Read() && hits.Count < cap)
         {
-            using var cmd = c.CreateCommand();
-            cmd.CommandText = """
-                SELECT subject_text, predicate, object, valid_at, event_id
-                FROM projection_fact_triples
-                WHERE workstream_id = $ws
-                  AND revoked_at IS NULL
-                  AND (subject_key LIKE '%' || $k || '%' OR $k LIKE '%' || subject_key || '%')
-                ORDER BY valid_at DESC;
-                """;
-            cmd.Parameters.AddWithValue("$ws", workstream.Value);
-            cmd.Parameters.AddWithValue("$k", key);
-            using var rd = cmd.ExecuteReader();
-            while (rd.Read() && hits.Count < cap)
-            {
-                var subject = rd.GetString(0);
-                var predicate = rd.GetString(1);
-                var obj = rd.GetString(2);
-                var dedup = $"{subject}\u0001{predicate}\u0001{obj}";
-                if (!seen.Add(dedup)) continue;
-                var validAt = DateTimeOffset.Parse(rd.GetString(3), System.Globalization.CultureInfo.InvariantCulture);
-                hits.Add(new SubjectTripleHit(
-                    new FactTriple(subject, predicate, obj), validAt, new EventId(rd.GetString(4))));
-            }
-            if (hits.Count >= cap) break;
+            var subject = rd.GetString(0);
+            var predicate = rd.GetString(1);
+            var obj = rd.GetString(2);
+            var dedup = $"{subject}\u0001{predicate}\u0001{obj}";
+            if (!seen.Add(dedup)) continue;
+            var validAt = DateTimeOffset.Parse(rd.GetString(3), System.Globalization.CultureInfo.InvariantCulture);
+            hits.Add(new SubjectTripleHit(
+                new FactTriple(subject, predicate, obj), validAt, new EventId(rd.GetString(4))));
         }
         return hits;
     }
@@ -618,20 +632,18 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
         if (subjectKeys.Count == 0) return ids;
 
         using var c = _connections.Open();
-        foreach (var key in subjectKeys)
-        {
-            using var cmd = c.CreateCommand();
-            cmd.CommandText = """
-                SELECT DISTINCT event_id FROM projection_fact_triples
-                WHERE workstream_id = $ws
-                  AND revoked_at IS NULL
-                  AND (subject_key LIKE '%' || $k || '%' OR $k LIKE '%' || subject_key || '%');
-                """;
-            cmd.Parameters.AddWithValue("$ws", workstream.Value);
-            cmd.Parameters.AddWithValue("$k", key);
-            using var rd = cmd.ExecuteReader();
-            while (rd.Read()) ids.Add(rd.GetString(0));
-        }
+        using var cmd = c.CreateCommand();
+        // One OR-joined query for all keys instead of a scan per key.
+        var ors = string.Join(" OR ", subjectKeys.Select((_, i) =>
+            $"(subject_key LIKE '%' || $k{i} || '%' OR $k{i} LIKE '%' || subject_key || '%')"));
+        cmd.CommandText = $"""
+            SELECT DISTINCT event_id FROM projection_fact_triples
+            WHERE workstream_id = $ws AND revoked_at IS NULL AND ({ors});
+            """;
+        cmd.Parameters.AddWithValue("$ws", workstream.Value);
+        for (var i = 0; i < subjectKeys.Count; i++) cmd.Parameters.AddWithValue($"$k{i}", subjectKeys[i]);
+        using var rd = cmd.ExecuteReader();
+        while (rd.Read()) ids.Add(rd.GetString(0));
         return ids;
     }
 

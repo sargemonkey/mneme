@@ -30,7 +30,22 @@ release notes.
   **release workflow** (`release.yml`) that packs + pushes to nuget.org.
 - ADR index (`docs/adr/`) and publishing runbook (`docs/PUBLISHING.md`).
 
+### Performance
+- Query hot paths batch candidate/subject-key lookups into single queries
+  (in-memory gating unchanged) and the fact-triple projector reuses a prepared
+  insert command — fewer allocations, better scaling. See
+  `docs/pre-release-review-2026-07.md`.
+
+### Documentation
+- README rewritten as a product-facing readme (install, quickstart, packages,
+  benchmark headline) with the phase-status board removed.
+- New `docs/INTEGRATION.md` one-shot integration recipe (agent-friendly) and
+  `docs/pre-release-review-2026-07.md` (perf + security review record).
+
 ### Security
+- Sidecar bearer-token auth now uses a constant-time comparison
+  (`CryptographicOperations.FixedTimeEquals`) instead of `string.Equals`,
+  closing a timing side-channel on the auth path (pre-release review).
 - Override the transitive `SQLitePCLRaw` stack (pulled by `Microsoft.Data.Sqlite`)
   to `bundle_e_sqlite3` **3.0.3**, which ships patched SQLite **3.50.4** and is
   out of the vulnerable range of **CVE-2025-6965** / GHSA-2m69-gcr7-jv3q

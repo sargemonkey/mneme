@@ -4,17 +4,20 @@
 
 **A local-first, .NET-native chronological memory substrate for AI agents.**
 
-Mneme is the thing your agent reaches for when it needs to know what was
-decided, what was tried, and what was learned — across sessions, across
-workstreams, across time. Not a wiki. Not a vector store. Not a chat
-history. A *substrate* that other software calls into and that quietly
-compresses everything an agent saw into useful, queryable, point-in-time-
-correct knowledge.
+Mneme is what your agent reaches for when it needs to know what was
+**decided**, what was **tried**, and what was **learned** — across sessions,
+across workstreams, across time. Not a wiki. Not a vector store. Not a chat
+log. A *substrate* that other software calls into, and that quietly compresses
+everything an agent saw into useful, queryable, point-in-time-correct
+knowledge.
+
+[![CI](https://github.com/jacobmsft/mneme/actions/workflows/ci.yml/badge.svg)](https://github.com/jacobmsft/mneme/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4)](https://dotnet.microsoft.com/)
 
 ```
                   ┌──────────────────────────────────────────────────────┐
                   │                Your agent host                       │
-                  │                                                      │
                   │   chat log (host-owned, full history, source of truth)
                   │       │                                  ▲           │
                   │       │ entries since last watermark     │ bundle    │
@@ -31,187 +34,158 @@ correct knowledge.
                                   ▼                        │
         ┌─────────────────────────────────────────────────────────────────┐
         │                       Mneme                                     │
-        │   ┌─────────────────────────────────────────────────────────┐   │
-        │   │      memory_events (append-only, bi-temporal)           │   │
-        │   │  Evidence | Fact | Decision | Hypothesis | Goal |       │   │
-        │   │  Action   | Outcome — every event carries a Citation    │   │
-        │   └─────────────────────────────────────────────────────────┘   │
-        │   projections (facts, decisions, chains, entities)              │
-        │   FTS5 + adaptive BM25 + recency + curation-weighted retrieval  │
-        │   HITL curation (amend / annotate / pin / demote / revert)      │
-        │   Capability-checked IMemoryQueryAPI + MCP server               │
+        │      memory_events (append-only, bi-temporal)                   │
+        │  Evidence | Fact | Decision | Hypothesis | Goal | Action | Outcome
+        │  projections · FTS5 + BM25 + semantic + recency retrieval        │
+        │  HITL curation · capability-checked query API · MCP server       │
         └─────────────────────────────────────────────────────────────────┘
 ```
 
-**Status:** Phases 0 – 10 + 8.5 shipped. 316 tests passing. Pre-alpha but functional.
-Phase 11 (sqlite-vec) blocked upstream.
+## Why Mneme
 
----
+- **Bi-temporal, append-only event log** of seven epistemic categories
+  (Evidence, Fact, Decision, Hypothesis, Goal, Action, Outcome) on plain
+  SQLite — auditable, rebuildable, point-in-time-correct.
+- **Bring your own LLM (or none).** The model is *host-supplied* via the
+  `ISessionDistiller` / `IDistiller` seams. Mneme itself has **zero** LLM
+  dependency — local Llama, OpenAI, Anthropic, Azure, on-device, or a stub.
+- **Proactive context compression.** Instead of handing an agent a giant raw
+  dump, Mneme distills sessions into a small, decision-useful synthesis.
+- **Capability-checked queries** with workstream isolation and point-in-time
+  (`AsOf`) lookups — no raw-SQL escape hatch on the public surface.
+- **Human-in-the-loop curation is first-class:** `amend`, `annotate`, `pin`,
+  `demote`, `revert`, all as append-only events with stale-state guards.
+- **Speaks MCP.** Any Copilot / Claude / Cursor client can call Mneme through
+  community-vocabulary tools (`remember`, `query`, `distill_session`, …).
+- **Local-first.** Everything is one SQLite file; optional append-only
+  snapshot sync, no last-write-wins conflict resolution.
 
-## What Mneme is
+On the [LoCoMo](https://github.com/snap-research/locomo) long-conversation
+memory benchmark, Mneme scores **within ~3 points of Mem0** on a fully-matched
+apples-to-apples configuration — at comparable retrieved context — and reaches
+**80%** at roughly one-tenth the token cost in an efficient configuration. See
+[the benchmark results](benchmarks/Mneme.Benchmarks.LoCoMo/RESULTS.md).
 
-- A **bi-temporal append-only event log** of seven epistemic categories
-  (Evidence, Fact, Decision, Hypothesis, Goal, Action, Outcome) on SQLite.
-- A **distillation pipeline** that turns raw session chat into a small,
-  decision-useful synthesis. The LLM is **host-supplied** via the
-  `ISessionDistiller` (ingest side) and `IDistiller` (read side)
-  interfaces; Mneme itself has zero LLM dependency.
-- A **capability-checked query API** with workstream isolation and
-  point-in-time (`AsOf`) queries — no raw-SQL escape hatch.
-- A **conservative entity-resolution policy**: deterministic UUID5
-  auto-merge; embedding ≥ 0.95 cosine auto-merge; LLM-judgment merges
-  go through a propose-then-confirm pipeline.
-- **HITL curation as a first-class surface** (`amend` / `annotate` /
-  `pin` / `demote` / `revert`) with stale-state guards.
-- **MCP server** alongside the .NET API: any Copilot / Claude / Cursor
-  client can call Mneme through community-vocab tools (`remember`,
-  `query`, `distill_session`, `get_watermark`, …).
-- **MAF integration** (`Mneme.Agents.AI`) — five lines of DI and a
-  Microsoft Agent Framework agent reads its prior context from Mneme.
-- **Optional cloud sync** of append-only snapshot batches; no
-  last-write-wins, no conflict resolution required.
+## Install
 
-## What Mneme is *not*
-
-- Not a wiki, doc tool, or note-taking app. End users don't browse
-  Mneme; they benefit from it via other software.
-- Not a vendor of an LLM. Bring your own (local llama, OpenAI,
-  Anthropic, Azure, on-device, none).
-- Not a cloud service. Local-first; optional snapshot sync.
-- Not Graphiti / Mem0 / Letta / Zep — see
-  [`plans/research-existing-systems.md`](plans/research-existing-systems.md)
-  for why those didn't fit (short answer: all Python/TS-first; no native
-  .NET embedded library existed).
-
-## The one big architectural rule
-
-**The host owns the chat log; Mneme owns the interpretation.** Mneme
-never stores raw chat turns. Periodically the host calls
-`IMemoryAgent.DistillSessionAsync(session, entries, capability)` with
-the entries that have accumulated since Mneme's persisted watermark for
-that session. Mneme runs the host's distiller, ingests the produced
-epistemic events with `Citation.SessionRange` stamps pointing back at
-the source entries, and atomically advances the watermark. Re-
-distillation is just calling again with a lower watermark; new events
-sit alongside old ones (append-only). This is locked in
-[`AGENTS.md`](AGENTS.md) and not subject to relitigation.
-
-## Project layout
-
-```
-mneme/
-├── README.md                   ← you are here
-├── ARCHITECTURE.md             ← deep technical walkthrough
-├── USAGE.md                    ← end-to-end howto for hosts
-├── AGENTS.md                   ← onboarding doc for AI coding agents
-├── CHANGELOG.md
-├── CONTRIBUTING.md
-├── Mneme.slnx                  ← solution (XML format)
-├── src/
-│   ├── Mneme.Contracts/        ← BCL-only interfaces + DTOs
-│   ├── Mneme/                  ← storage, ingest, projections, query, etc.
-│   ├── Mneme.Mcp/              ← stdio MCP server
-│   ├── Mneme.Agents.AI/        ← Microsoft Agent Framework integration
-│   ├── Mneme.Sidecar/          ← HTTP sidecar host + Dockerfile
-│   ├── Mneme.Cli/              ← command-line front-end
-│   ├── Mneme.Studio/           ← Blazor Server UI
-│   ├── Mneme.Studio.Desktop/   ← Photino-wrapped native window
-│   └── Mneme.Studio.Electron/  ← pure-desktop Electron app
-├── samples/
-│   └── Mneme.Samples.AgentHost/  ← canonical end-to-end pattern
-├── benchmarks/
-│   └── Mneme.Benchmarks/         ← LoCoMo/LongMemEval harness
-├── tests/
-│   ├── Mneme.Contracts.Tests/    (136 tests)
-│   ├── Mneme.Tests/              (177 tests)
-│   └── Mneme.Agents.AI.Tests/    (3 tests)
-└── plans/                        ← design docs, research, backlog
-```
-
-## Quick start
+Mneme targets **.NET 8+**. One package gives you the memory store (the
+contracts are bundled in):
 
 ```pwsh
-# Restore + build + test
+dotnet add package Mneme --prerelease
+```
+
+Optional add-ons:
+
+```pwsh
+dotnet add package Mneme.Agents.AI --prerelease   # Microsoft Agent Framework integration
+dotnet tool install -g Mneme.Mcp --prerelease     # MCP server tool (command: mneme-mcp)
+```
+
+## Quickstart
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using Mneme.Contracts;
+using Mneme.Hosting;
+
+var services = new ServiceCollection();
+services.AddMneme(o =>
+{
+    o.WorkstreamId = "my-team-q3-2026";
+    o.SqlitePath   = Path.Combine(AppContext.BaseDirectory, "data", "mneme.db");
+    o.UserId       = "alice@contoso.com";
+});
+
+// Bring your own distiller (chat turns -> epistemic events). Any IChatClient works.
+services.AddSingleton<ISessionDistiller>(_ => new MySessionDistiller(myChatClient));
+
+await using var sp = services.BuildServiceProvider();
+var agent = sp.GetRequiredService<IMemoryAgent>();
+var query = sp.GetRequiredService<IMemoryQueryAPI>();
+var token = sp.GetRequiredService<CapabilityToken>();
+
+// 1. Distill the session tail since Mneme's last watermark into memory.
+await agent.DistillSessionAsync(session, entriesSinceWatermark, token);
+
+// 2. Ask a capability-checked, point-in-time-correct question later.
+var result = await query.QueryAsync(
+    new QueryRequest(new QuerySpec(new WorkstreamId("my-team-q3-2026"),
+        FreeText: "what did we decide about the auth rollout?")), token);
+```
+
+**The one architectural rule:** *the host owns the chat log; Mneme owns the
+interpretation.* Mneme never stores raw chat turns — it distills the entries
+that accumulated since its persisted watermark, ingests the resulting events
+with citations back to the source, and advances the watermark atomically.
+
+Full walkthrough in **[USAGE.md](USAGE.md)** (ingest paths, reading, curation,
+MCP, MAF, sidecar, cloud sync, capability scoping).
+
+## Use it from an MCP client
+
+Installed as a tool, Mneme is a stdio MCP server any MCP-capable client can
+launch:
+
+```jsonc
+// e.g. an MCP client config
+{
+  "mcpServers": {
+    "mneme": { "command": "mneme-mcp", "args": [] }
+  }
+}
+```
+
+It exposes `remember`, `query`, `distill_session`, `get_watermark`, and more.
+
+## Documentation
+
+| Doc | What it covers |
+|---|---|
+| [docs/INTEGRATION.md](docs/INTEGRATION.md) | **One-shot integration recipe** — add Mneme to a host in a single pass. |
+| [USAGE.md](USAGE.md) | End-to-end host integration guide. |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Deep technical walkthrough + design rationale. |
+| [docs/why-continuous-memory.md](docs/why-continuous-memory.md) | Primer: why agent memory matters and where Mneme fits. |
+| [docs/PUBLISHING.md](docs/PUBLISHING.md) | Release + NuGet publishing runbook. |
+| [docs/adr/](docs/adr/) | Architecture decision records. |
+| [benchmarks/…/RESULTS.md](benchmarks/Mneme.Benchmarks.LoCoMo/RESULTS.md) | LoCoMo benchmark methodology + numbers. |
+| [AGENTS.md](AGENTS.md) | Onboarding + conventions for AI coding agents. |
+
+## Build from source
+
+```pwsh
 dotnet build Mneme.slnx
 dotnet test  Mneme.slnx
 
-# Run the end-to-end sample (no API key needed; uses a stub LLM)
-cd samples/Mneme.Samples.AgentHost
-dotnet run
+# Run the end-to-end sample (no API key; uses a stub LLM)
+dotnet run --project samples/Mneme.Samples.AgentHost
 ```
 
-See [USAGE.md](USAGE.md) for the full howto, [ARCHITECTURE.md](ARCHITECTURE.md)
-for the design walkthrough.
+## Packages
+
+| Package | Kind | Description |
+|---|---|---|
+| `Mneme` | library | Core memory substrate (SQLite-backed). Bundles the BCL-only `Mneme.Contracts` surface. |
+| `Mneme.Agents.AI` | library | Microsoft Agent Framework integration (`MnemeContextProvider`). |
+| `Mneme.Mcp` | .NET tool | MCP server (`mneme-mcp`). |
 
 ## Status
 
-| Phase | Status | What |
-|---|---|---|
-| 0 — Contracts | ✅ | BCL-only `Mneme.Contracts` |
-| 1 — Event log + ingest | ✅ | SQLite WAL, secret redactor, <50ms p99 |
-| 2 — Classification + revocation | ✅ | `AddMneme(opts=>{})` DI helper |
-| 3 — Projections + FTS5 | ✅ | facts/decisions/goals/hypotheses + adaptive-BM25 |
-| 4 — Capability-checked query API | ✅ | Explain + AsOf bi-temporal lookup |
-| 4.5 — Benchmarks | ✅ | Full LoCoMo-10 harness (1,986 Q): hybrid retrieval, GitHub-Models runner, Mem0-aligned answerer+judge+scope, resume/CSV/MD. **89.6% Mem0-comparable (gpt-4o, parity) / 80.3% (gpt-4o-mini, ~9× less context)** |
-| 5 — Distillation | ✅ | `IDistiller` (read) + `ISessionDistiller` (ingest) |
-| 6 — Entity resolution | ✅ | 3-tier (UUID5 / cosine ≥0.95 / LLM-propose) |
-| 7 — Outcome closure | ✅ | `DecisionChainsProjector` + `FeedbackLearner` |
-| 7.5 — HITL curation | ✅ | `IMemoryCurator` w/ amend/annotate/pin/demote/revert |
-| 8 — MCP server | ✅ | stdio, community-vocab tools |
-| 8.5 — MAF integration | ✅ | `MnemeContextProvider : AIContextProvider` |
-| 9 — HTTP sidecar | ✅ | bearer-auth + Dockerfile |
-| 10 — Cloud sync | ✅ | `ISyncStore` + `SyncEngine` |
-| UI scaffold | ✅ | Studio (Blazor) + Desktop (Photino) + Electron |
-| 11 — sqlite-vec | ⏸ blocked | Waiting on sqlite-vec v1; brute-force cosine `VectorIndex` shipped as the bridge |
-| 12 — Subject-attributed KG | ✅ | `FactTriple` + `projection_fact_triples` + subject-scoped query + append-only `SubjectTriples` supplement + `SubjectTripleResolver`. **Validated: separate triple pass + answer-context supplement = +3.2pp overall / +3.5pp adversarial** (`benchmarks/.../ANALYSIS.md` Exp 8) |
-
-**Verification**: `dotnet test Mneme.slnx` → 344/344.
-
-## LoCoMo benchmark (apples-to-apples)
-
-Tight like-for-like vs Mem0 — **same answerer+judge model (gpt-4o), same
-retrieval depth (top-200), same answer procedure, same lenient J-score judge,
-same category scope (LoCoMo cat 1–4)**. Full 10-conversation set (1,540 in-scope
-questions).
-
-| System | LoCoMo (cat 1–4) | Answerer | Retrieval depth | Tokens / query |
-|---|---:|---|---:|---:|
-| **Mneme** | **89.6%** | gpt-4o | top-200 | ~6,254 |
-| Mem0 (reported) | 92.5% | gpt-4o | top-200 | ~6,956 |
-
-Mneme lands **within ~3pp of Mem0** on a fully-matched configuration, at
-comparable retrieved context — the residual is plausibly within
-distiller-model + judge-noise margins. Per-category (parity): single-hop 91.4%,
-temporal 90.3%, multi-hop 88.3%, open-domain 75.0%. Almost the entire *apparent*
-gap to Mem0 turned out to be measurement + configuration (scope, judge, answer
-prompt, model, retrieval depth), not memory-layer capability.
-
-**Supplemental (not apples-to-apples):** an efficiency configuration
-(gpt-4o-mini, top-25) reaches **80.3% at ~9× less retrieved context (~724
-tokens/query)**; and Mneme separately reports the **adversarial** category that
-Mem0 excludes from scoring (where deeper retrieval trades attribution precision
-for recall). Full methodology, both operating points, the alignment ladder, and
-caveats:
-[`benchmarks/Mneme.Benchmarks.LoCoMo/RESULTS.md`](benchmarks/Mneme.Benchmarks.LoCoMo/RESULTS.md).
-
-## Background reading
-
-New to agent memory? Start with
-[`docs/why-continuous-memory.md`](docs/why-continuous-memory.md) — a
-primer on why continuous memory matters, the four core memory types,
-how memory updates, and where Mneme fits among Mem0 / Letta / Zep and
-others. For a deeper field survey, see
-[`plans/memory-systems-primer.md`](plans/memory-systems-primer.md).
+Pre-1.0. Phases 0–12 implemented; the public API may change between minor
+versions until 1.0. Semantic retrieval ships today via a brute-force cosine
+index + hybrid fusion; a `sqlite-vec`-backed index for million-vector corpora
+is deferred until that extension reaches 1.0.
 
 ## License
 
-[Apache License 2.0](LICENSE). Mneme contains prompt templates ported
-from [getzep/graphiti](https://github.com/getzep/graphiti) (also
-Apache 2.0). See [`NOTICE`](NOTICE).
+[Apache License 2.0](LICENSE). Mneme contains prompt templates and a benchmark
+grading methodology adapted (in Mneme's own wording) from
+[getzep/graphiti](https://github.com/getzep/graphiti) and
+[mem0ai/memory-benchmarks](https://github.com/mem0ai/memory-benchmarks), both
+Apache 2.0. See [NOTICE](NOTICE).
 
 ## Contributing
 
-Pre-alpha. Issues for design feedback are very welcome. For day-to-day
-conventions, build commands, locked decisions, and the "don't do this"
-list, read [`AGENTS.md`](AGENTS.md). For code-of-conduct and PR
-mechanics, see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+Issues for design feedback are very welcome. For conventions, build commands,
+locked decisions, and the "don't do this" list, read [AGENTS.md](AGENTS.md);
+for PR mechanics and code of conduct, [CONTRIBUTING.md](CONTRIBUTING.md).

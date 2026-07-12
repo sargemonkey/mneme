@@ -47,6 +47,26 @@ public sealed class FactTriplesProjector : IProjector
 
         var revoked = e.RevokedAt.HasValue ? (object)FactsProjector.Fmt(e.RevokedAt.Value) : DBNull.Value;
         var validAt = FactsProjector.Fmt(e.ValidAt);
+
+        // Reuse one prepared command across all triples (bind params per row)
+        // instead of allocating + preparing a fresh command per triple.
+        using var cmd = c.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = """
+            INSERT INTO projection_fact_triples(workstream_id, event_id, ordinal,
+                subject_text, subject_key, subject_entity_id, predicate, object, valid_at, revoked_at)
+            VALUES ($ws, $eid, $ord, $stext, $skey, NULL, $pred, $obj, $va, $rev);
+            """;
+        var pWs = cmd.Parameters.Add("$ws", Microsoft.Data.Sqlite.SqliteType.Text); pWs.Value = e.WorkstreamId.Value;
+        var pEid = cmd.Parameters.Add("$eid", Microsoft.Data.Sqlite.SqliteType.Text); pEid.Value = e.EventId.Value;
+        var pOrd = cmd.Parameters.Add("$ord", Microsoft.Data.Sqlite.SqliteType.Integer);
+        var pStext = cmd.Parameters.Add("$stext", Microsoft.Data.Sqlite.SqliteType.Text);
+        var pSkey = cmd.Parameters.Add("$skey", Microsoft.Data.Sqlite.SqliteType.Text);
+        var pPred = cmd.Parameters.Add("$pred", Microsoft.Data.Sqlite.SqliteType.Text);
+        var pObj = cmd.Parameters.Add("$obj", Microsoft.Data.Sqlite.SqliteType.Text);
+        var pVa = cmd.Parameters.Add("$va", Microsoft.Data.Sqlite.SqliteType.Text); pVa.Value = validAt;
+        var pRev = cmd.Parameters.Add("$rev", Microsoft.Data.Sqlite.SqliteType.Text); pRev.Value = revoked;
+
         var ordinal = 0;
         foreach (var t in triples)
         {
@@ -55,22 +75,11 @@ public sealed class FactTriplesProjector : IProjector
             {
                 continue;
             }
-            using var cmd = c.CreateCommand();
-            cmd.Transaction = tx;
-            cmd.CommandText = """
-                INSERT INTO projection_fact_triples(workstream_id, event_id, ordinal,
-                    subject_text, subject_key, subject_entity_id, predicate, object, valid_at, revoked_at)
-                VALUES ($ws, $eid, $ord, $stext, $skey, NULL, $pred, $obj, $va, $rev);
-                """;
-            cmd.Parameters.AddWithValue("$ws", e.WorkstreamId.Value);
-            cmd.Parameters.AddWithValue("$eid", e.EventId.Value);
-            cmd.Parameters.AddWithValue("$ord", ordinal++);
-            cmd.Parameters.AddWithValue("$stext", t.Subject);
-            cmd.Parameters.AddWithValue("$skey", subjectKey);
-            cmd.Parameters.AddWithValue("$pred", t.Predicate);
-            cmd.Parameters.AddWithValue("$obj", t.Object);
-            cmd.Parameters.AddWithValue("$va", validAt);
-            cmd.Parameters.AddWithValue("$rev", revoked);
+            pOrd.Value = ordinal++;
+            pStext.Value = t.Subject;
+            pSkey.Value = subjectKey;
+            pPred.Value = t.Predicate;
+            pObj.Value = t.Object;
             cmd.ExecuteNonQuery();
         }
     }
