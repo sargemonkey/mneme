@@ -5,6 +5,7 @@ using Mneme.Ingest.Distillation;
 using Mneme.Ingest.Redaction;
 using Mneme.Ingest.Validation;
 using Mneme.Observability;
+using Mneme.Review;
 using Mneme.Sessions;
 using Mneme.Storage;
 
@@ -40,6 +41,7 @@ public sealed class MemoryAgent : IMemoryAgent
     private readonly TimeProvider _clock;
     private readonly IReadOnlyList<IIngestObserver> _observers;
     private readonly ISessionDistiller? _sessionDistiller;
+    private readonly WorkstreamConfigStore? _workstreamConfig;
 
     /// <summary>Construct against the storage layer with default helpers and no observers.</summary>
     public MemoryAgent(SqliteConnectionFactory connections)
@@ -78,6 +80,27 @@ public sealed class MemoryAgent : IMemoryAgent
         TimeProvider clock,
         IEnumerable<IIngestObserver> observers,
         ISessionDistiller? sessionDistiller)
+        : this(connections, redactor, shapeSelector, classifier, clock, observers, sessionDistiller, workstreamConfig: null)
+    { }
+
+    /// <summary>
+    /// Full construct including an optional host session distiller and an optional
+    /// <see cref="WorkstreamConfigStore"/>. When the config store reports a
+    /// workstream is in <see cref="WorkstreamMode.ReviewBeforeDistill"/>, ingested
+    /// epistemic events are parked in the <c>review_queue</c> instead of being
+    /// projected — the HITL gate (see <see cref="Review.SqliteReviewQueue"/>).
+    /// With no config store (the default), every workstream is
+    /// <see cref="WorkstreamMode.AutoDistill"/> and behavior is unchanged.
+    /// </summary>
+    public MemoryAgent(
+        SqliteConnectionFactory connections,
+        IRedactor redactor,
+        IContentShapeSelector shapeSelector,
+        Classification.IClassifier classifier,
+        TimeProvider clock,
+        IEnumerable<IIngestObserver> observers,
+        ISessionDistiller? sessionDistiller,
+        WorkstreamConfigStore? workstreamConfig)
     {
         ArgumentNullException.ThrowIfNull(connections);
         ArgumentNullException.ThrowIfNull(redactor);
@@ -92,6 +115,7 @@ public sealed class MemoryAgent : IMemoryAgent
         _clock = clock;
         _observers = observers.ToArray();
         _sessionDistiller = sessionDistiller;
+        _workstreamConfig = workstreamConfig;
     }
 
     /// <inheritdoc/>
@@ -156,29 +180,69 @@ public sealed class MemoryAgent : IMemoryAgent
         var wasDuplicate = Persist(record);
         activity?.SetTag("mneme.ingest.duplicate", wasDuplicate);
 
-        if (!wasDuplicate && _observers.Count > 0)
+        if (!wasDuplicate)
         {
-            var envelope = new Mneme.Projections.EventEnvelope(
-                EventId: record.EventId,
-                WorkstreamId: record.WorkstreamId,
-                Channel: record.Channel,
-                Category: record.Category,
-                SchemaVersion: record.SchemaVersion,
-                ValidAt: record.ValidAt,
-                InvalidAt: record.InvalidAt,
-                CreatedAt: record.CreatedAt,
-                ExpiredAt: record.ExpiredAt,
-                Classification: record.Classification,
-                RevokedAt: null,
-                Payload: redactedPayload,
-                Provenance: evt.Provenance);
-            foreach (var observer in _observers)
+            // HITL gate: epistemic events for a workstream in ReviewBeforeDistill mode are
+            // held in the review_queue and NOT projected until a curator approves them
+            // (see Review.SqliteReviewQueue). Technical bookkeeping events are never gated.
+            // The event itself is already durable in memory_events (append-only) either way.
+            var mode = evt.Channel == EventChannel.Epistemic
+                ? (_workstreamConfig?.GetMode(record.WorkstreamId) ?? WorkstreamMode.AutoDistill)
+                : WorkstreamMode.AutoDistill;
+            activity?.SetTag("mneme.workstream_mode", (int)mode);
+
+            if (mode == WorkstreamMode.ReviewBeforeDistill)
             {
-                observer.OnIngested(envelope);
+                QueueForReview(record.EventId, record.WorkstreamId, nowUtc, ReviewSummary(redactedPayload));
+            }
+            else if (_observers.Count > 0)
+            {
+                var envelope = new Mneme.Projections.EventEnvelope(
+                    EventId: record.EventId,
+                    WorkstreamId: record.WorkstreamId,
+                    Channel: record.Channel,
+                    Category: record.Category,
+                    SchemaVersion: record.SchemaVersion,
+                    ValidAt: record.ValidAt,
+                    InvalidAt: record.InvalidAt,
+                    CreatedAt: record.CreatedAt,
+                    ExpiredAt: record.ExpiredAt,
+                    Classification: record.Classification,
+                    RevokedAt: null,
+                    Payload: redactedPayload,
+                    Provenance: evt.Provenance);
+                foreach (var observer in _observers)
+                {
+                    observer.OnIngested(envelope);
+                }
             }
         }
 
         return new IngestResult(evt.EventId, nowUtc, wasDuplicate);
+    }
+
+    /// <summary>Park an ingested-but-not-yet-reviewed event in the review queue (status pending).</summary>
+    private void QueueForReview(EventId eventId, WorkstreamId workstream, DateTimeOffset capturedAt, string summary)
+    {
+        using var connection = _connections.Open();
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO review_queue(event_id, workstream_id, captured_at, status, summary)
+            VALUES ($eventId, $workstreamId, $capturedAt, 'pending', $summary)
+            ON CONFLICT(event_id) DO NOTHING;
+            """;
+        cmd.Parameters.AddWithValue("$eventId", eventId.Value);
+        cmd.Parameters.AddWithValue("$workstreamId", workstream.Value);
+        cmd.Parameters.AddWithValue("$capturedAt", FormatTimestamp(capturedAt));
+        cmd.Parameters.AddWithValue("$summary", summary);
+        cmd.ExecuteNonQuery();
+    }
+
+    private static string ReviewSummary(EventPayload payload)
+    {
+        var text = PayloadText(payload).Trim();
+        const int max = 200;
+        return text.Length <= max ? text : text[..max];
     }
 
     /// <inheritdoc/>

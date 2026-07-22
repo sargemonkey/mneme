@@ -11,6 +11,7 @@ using Mneme.Projections;
 using Mneme.Query;
 using Mneme.Resolution;
 using Mneme.Revocation;
+using Mneme.Review;
 using Mneme.Search;
 using Mneme.Sessions;
 using Mneme.Storage;
@@ -103,6 +104,9 @@ public static class MnemeServiceCollectionExtensions
             sp.GetRequiredService<ProjectorPipeline>()));
         services.AddSingleton<IIngestObserver>(sp => new TextSearchIngestObserver(
             sp.GetRequiredService<TextSearchService>()));
+        services.TryAddSingleton<WorkstreamConfigStore>(sp => new WorkstreamConfigStore(
+            sp.GetRequiredService<SqliteConnectionFactory>(),
+            sp.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton<IMemoryAgent>(sp => new MemoryAgent(
             sp.GetRequiredService<SqliteConnectionFactory>(),
             sp.GetRequiredService<IRedactor>(),
@@ -110,10 +114,16 @@ public static class MnemeServiceCollectionExtensions
             sp.GetRequiredService<IClassifier>(),
             sp.GetRequiredService<TimeProvider>(),
             sp.GetServices<IIngestObserver>(),
-            sp.GetService<ISessionDistiller>()));
+            sp.GetService<ISessionDistiller>(),
+            sp.GetRequiredService<WorkstreamConfigStore>()));
         services.TryAddSingleton<IRevocationService>(sp => new SqliteRevocationService(
             sp.GetRequiredService<SqliteConnectionFactory>(),
             sp.GetRequiredService<TimeProvider>()));
+        services.TryAddSingleton<IReviewQueue>(sp => new SqliteReviewQueue(
+            sp.GetRequiredService<SqliteConnectionFactory>(),
+            sp.GetRequiredService<TimeProvider>(),
+            sp.GetServices<IIngestObserver>(),
+            sp.GetRequiredService<IRevocationService>()));
         services.TryAddSingleton<IMemoryQueryAPI>(sp => new MemoryQueryApi(
             sp.GetRequiredService<SqliteConnectionFactory>(),
             sp.GetRequiredService<TextSearchService>(),

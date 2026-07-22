@@ -27,7 +27,7 @@ namespace Mneme.Storage;
 public static class SqliteSchema
 {
     /// <summary>Current schema version. Bumped when the DDL changes incompatibly.</summary>
-    public const int Version = 10;
+    public const int Version = 11;
 
     /// <summary>
     /// Idempotently create all Phase 1 tables, indexes, and the
@@ -500,5 +500,27 @@ public static class SqliteSchema
             ON projection_fact_triples(workstream_id, subject_key);
         CREATE INDEX IF NOT EXISTS idx_fact_triples_subject_entity
             ON projection_fact_triples(workstream_id, subject_entity_id);
+
+        CREATE TABLE IF NOT EXISTS workstream_config (
+            workstream_id TEXT NOT NULL PRIMARY KEY,
+            mode          INTEGER NOT NULL DEFAULT 0,
+            updated_at    TEXT NOT NULL
+        ) WITHOUT ROWID;
+
+        CREATE TABLE IF NOT EXISTS review_queue (
+            event_id      TEXT NOT NULL PRIMARY KEY,
+            workstream_id TEXT NOT NULL,
+            captured_at   TEXT NOT NULL,
+            status        TEXT NOT NULL DEFAULT 'pending'
+                          CHECK(status IN ('pending', 'approved', 'rejected', 'deferred')),
+            summary       TEXT NOT NULL DEFAULT '',
+            reviewer_id   TEXT,
+            reviewed_at   TEXT,
+            defer_until   TEXT,
+            rationale     TEXT
+        ) WITHOUT ROWID;
+
+        CREATE INDEX IF NOT EXISTS idx_review_queue_workstream_status
+            ON review_queue(workstream_id, status, captured_at);
         """;
 }

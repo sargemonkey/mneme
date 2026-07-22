@@ -376,11 +376,13 @@ Dependencies: Phase 4.
   rather than main `BundleSection[]` unless directly queried). Read
   from the `entity_curation_weights` projection. See `plan.md`
   "Human-in-the-loop curation".
-- [ ] **mem-distillation-review-queue-gate** — When a workstream is
-  in `WorkstreamMode.ReviewBeforeDistill`, the distillation worker
-  skips events flagged pending review until `IReviewQueue
-  .ApproveAsync` is called. Default mode is `AutoDistill` (no
-  behavior change). See `plan.md` "Human-in-the-loop curation".
+- [x] **mem-distillation-review-queue-gate** — When a workstream is
+  in `WorkstreamMode.ReviewBeforeDistill`, the ingest gate skips the
+  projector/index observers for its epistemic events until
+  `IReviewQueue.ApproveAsync` is called (mode read from
+  `workstream_config` via `WorkstreamConfigStore`). Default mode is
+  `AutoDistill` (no behavior change). See `plan.md` "Human-in-the-loop
+  curation".
 
 ---
 
@@ -531,17 +533,21 @@ differentiator)" for the full design.
   Test fixture: query at `as_of < amend_time` returns the original;
   query at `as_of >= amend_time` returns the amended. See
   `memory-systems-primer.md` §7.
-- [ ] **mem-review-queue-table** — Schema:
+- [x] **mem-review-queue-table** — Schema:
   `review_queue(event_id PK, workstream_id, captured_at, status
   TEXT CHECK(status IN ('pending', 'approved', 'rejected',
-  'deferred')), reviewer_id, reviewed_at, defer_until, rationale)`.
-  Workstreams in `ReviewBeforeDistill` mode insert here; the
-  distillation worker filters them out until status = approved.
-- [ ] **mem-review-queue-api** — Implement `IReviewQueue`
-  (`arch-ireviewqueue`). Approve appends an `event.review_approved`
-  technical event so audit shows the human's go-ahead. Reject
-  appends `event.review_rejected` and tombstones the source
-  (calls into `mem-revocation`).
+  'deferred')), summary, reviewer_id, reviewed_at, defer_until,
+  rationale)` plus `workstream_config(workstream_id PK, mode,
+  updated_at)` for the per-workstream `WorkstreamMode`. Workstreams in
+  `ReviewBeforeDistill` mode insert here; queries filter them out until
+  approved. (schema v11)
+- [x] **mem-review-queue-api** — Implement `IReviewQueue`
+  (`arch-ireviewqueue`) as `Review/SqliteReviewQueue`. Approve replays
+  the ingest observers (projecting/indexing the event) and appends an
+  `event.review_approved` technical event so audit shows the human's
+  go-ahead. Reject appends `event.review_rejected` and tombstones the
+  source (calls into `mem-revocation`). All mutating calls require
+  `CurationCapability.CanReview`. Registered in `AddMneme`.
 - [ ] **mem-curation-capability-tests** — One test per
   `CanAmend / CanRevoke / CanPin / CanSplit / CanMerge / CanReview`
   flag: a `CurationCapability` with the flag unset → operation
