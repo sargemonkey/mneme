@@ -10,12 +10,19 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
-    <!-- Override the transitive SQLitePCLRaw 2.1.6 (SQLite < 3.50.2, CVE-2025-6965 /
-         GHSA-2m69-gcr7-jv3q, vulnerable range <= 2.1.11) with the 3.x bundle, which
-         ships patched SQLite and is out of the advisory range. Kept on the 8.x line
-         of Microsoft.Data.Sqlite to stay net8-friendly. -->
-    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="8.0.10" />
+    <!-- SQLCipher bundle: enables transparent at-rest encryption via the connection
+         `Password` (Microsoft.Data.Sqlite issues `PRAGMA key` on open). We use
+         Microsoft.Data.Sqlite.**Core** (BYO-provider) + this bundle so ONLY the SQLCipher
+         native ships — the plain, vulnerable `lib.e_sqlite3` that full Microsoft.Data.Sqlite
+         would drag in transitively (CVE-2025-6965 / GHSA-2m69-gcr7-jv3q) is not present.
+         SECURITY TRADEOFF: `bundle_e_sqlcipher` tops out at 2.1.11 and bundles a SQLite older
+         than the 3.50.2 fix, so the underlying CVE is not fully escaped; accepted to restore
+         always-encrypted-at-rest for MuxiMuxi's durable memory (low practical risk for a local
+         store with NO untrusted SQL). Revisit (bump to a patched 3.x `e_sqlcipher` bundle) when
+         one ships. Encryption is OPT-IN (MnemeOptions.EncryptionKey); SQLCipher reads plain DBs
+         with no key, so consumers that don't set a key are unaffected. -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlcipher" Version="2.1.11" />
     <PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="9.7.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
   </ItemGroup>

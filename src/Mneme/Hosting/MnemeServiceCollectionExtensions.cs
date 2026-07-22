@@ -71,7 +71,7 @@ public static class MnemeServiceCollectionExtensions
         {
             Directory.CreateDirectory(directory);
         }
-        var factory = new SqliteConnectionFactory(opts.SqlitePath);
+        var factory = new SqliteConnectionFactory(opts.SqlitePath, opts.EncryptionKey);
         using (var bootstrap = factory.Open())
         {
             SqliteSchema.Initialize(bootstrap);

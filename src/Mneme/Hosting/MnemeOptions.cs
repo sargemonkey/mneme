@@ -21,6 +21,15 @@ public sealed class MnemeOptions
     /// <summary>Absolute path to the SQLite database file.</summary>
     public string? SqlitePath { get; set; }
 
+    /// <summary>
+    /// Optional SQLCipher passphrase for transparent at-rest encryption. When set, the
+    /// entire database file is encrypted on disk (plaintext only in memory); when null the
+    /// database is plain SQLite (default). Key management is the host's responsibility —
+    /// supply a strong random key from an OS-backed store (e.g. DPAPI / Keychain). Changing
+    /// or losing the key makes an existing encrypted database unreadable.
+    /// </summary>
+    public string? EncryptionKey { get; set; }
+
     /// <summary>Principal id used as the default for the auto-built capability token.</summary>
     public string? UserId { get; set; }
 

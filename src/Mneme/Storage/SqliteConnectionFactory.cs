@@ -29,9 +29,15 @@ public sealed class SqliteConnectionFactory
 
     /// <summary>
     /// Build a factory bound to a SQLite file on disk. The containing
-    /// directory must already exist.
+    /// directory must already exist. When <paramref name="encryptionKey"/> is
+    /// non-empty the database is opened with SQLCipher (transparent at-rest
+    /// encryption): Microsoft.Data.Sqlite issues <c>PRAGMA key</c> during
+    /// <see cref="SqliteConnection.Open"/>, before any other statement. A key
+    /// is treated as a SQLCipher passphrase (KDF-derived). Opening an existing
+    /// database with the wrong/absent key fails; SQLCipher reads plain
+    /// databases when no key is supplied.
     /// </summary>
-    public SqliteConnectionFactory(string databasePath)
+    public SqliteConnectionFactory(string databasePath, string? encryptionKey = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(databasePath);
         var builder = new SqliteConnectionStringBuilder
@@ -41,6 +47,10 @@ public sealed class SqliteConnectionFactory
             Cache = SqliteCacheMode.Default,
             Pooling = true,
         };
+        if (!string.IsNullOrEmpty(encryptionKey))
+        {
+            builder.Password = encryptionKey;
+        }
         _connectionString = builder.ConnectionString;
         _isMemory = false;
     }
