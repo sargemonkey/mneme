@@ -820,6 +820,96 @@ Open (further, not blocking):
 
 ---
 
+## Phase 13 — Multi-agent concurrency on a shared workstream
+
+Gated by **ADR-0004** (`docs/adr/0004-multi-agent-and-dreaming.md`,
+status Proposed). Additive + nullable-optional: single-agent hosts are
+untouched. The append-only bi-temporal log is already the correct
+concurrency primitive for N writers (ULID idempotency → no lost
+updates); this phase adds the scope/visibility/conflict surfaces on top.
+
+- [x] **phase13-agent-role-scope** — Agent/role as a scope axis distinct
+  from workstream. Nullable `QuerySpec.Principal` filter + indexed
+  `memory_events.principal_id` (mirrors provenance author; O(index)
+  data-subject access/erasure). Enforced on all read paths. Schema v12.
+  Tested (`AgentScopeTests`). *(shipped)*
+- [x] **phase13-contradiction-detection** — Two currently-valid triples with
+  the same `subject_key` + `predicate` but a different `object` are recorded
+  as open candidates in `memory_contradictions` (schema v15) by a
+  `ContradictionsProjector` (runs after `FactTriplesProjector`), instead of
+  silent supersession. Deterministic, structured-triple only, trim/case-
+  insensitive object compare; candidates are for human review, never
+  auto-resolved. Tested (`ContradictionDetectionTests`). *(shipped)*
+- [x] **phase13-visibility-tier** — `Visibility` (Private/Shared/Global) in
+  a mutable `memory_visibility` sidecar (promotion never touches the log).
+  Sensitive classes default Private (author-only); else Shared. Enforced
+  on all read paths. Schema v13. Tested (`VisibilityTierTests`). *(shipped)*
+
+## Phase 14 — Offline "dreaming" / consolidation
+
+Gated by **ADR-0004**. Proactive, cross-session/cross-agent, scheduled
+*abstraction* — the counterpart to Phase-5 reactive per-session
+*extraction*. Makes intelligence compound (dedup, abstraction, skills)
+while keeping every derived memory auditable and boundary-safe.
+
+- [x] **phase14-citation-derived** — `Citation.Derived(From[], ConsolidatorId)`
+  added to the closed polymorphic `Citation` set. Lets consolidation
+  operate over Mneme's own event log (not raw transcripts — ADR-0003),
+  keeps the audit chain + rebuildable projections. Tested
+  (`CitationTests`). *(shipped)*
+- [x] **phase14-skill-category** — Procedural "how we reliably do X"
+  memory. Per ADR-0004: a **distinct procedural-memory projection**
+  (`projection_skills` + `SkillPayload`), **not** an 8th `EpistemicCategory`
+  (skills ride under `Evidence`; `SkillsProjector` matches by payload type).
+  Schema v14. Tested (`SkillProjectionTests`). *(shipped)*
+- [ ] **phase14-idreamer-dreamjob** — Host-supplied `IDreamer` (versioned
+  `Id`, symmetric to `ISessionDistiller`/`IDistiller`) over an
+  event-range query across sessions/agents; scheduled `DreamJob` worker
+  (replay → abstract → reconcile → promote). Emits `Derived` events.
+  Depends on `phase13-visibility-tier` + `phase14-citation-derived`.
+- [ ] **phase14-cross-session-reconcile** — Dedup / prune across
+  concurrent sessions; **proposes** entity merges into the review queue
+  (never auto-applies — conservative-entity-resolution locked decision).
+  Depends on `phase14-idreamer-dreamjob`.
+- [ ] **phase14-dreamer-guardrails** — Binding privacy acceptance
+  criteria for the consolidator (ADR-0004 §Privacy): (1) classification
+  floor — promote to `global` only from `Public`/`Internal` sources; (2)
+  re-run `IRedactor` on every dreamer-produced event; (3) capability-gate
+  `Citation.Derived` traversal per source workstream; (4) opt-in
+  `workstream_config.ParticipatesInCrossWorkstreamConsolidation` (default
+  false); (5) full audit of `DreamJob` reads/writes. Depends on
+  `phase14-idreamer-dreamjob`.
+- [ ] **phase14-fleet-global-skills** — Run the dreamer with a
+  cross-workstream capability to mine patterns *across* workstreams into
+  a `global`-visibility skill library. Depends on
+  `phase14-dreamer-guardrails` (the boundary-crossing job carries the
+  strongest guardrails).
+
+---
+
+## Consumer sample — Mneme.Studio.Agent (ACP desktop app)
+
+Not a substrate phase; a reference consumer that exercises the full
+loop. Photino + Blazor desktop app that is an ACP **client** (via
+`LibAcp`) driving **GitHub Copilot over `copilot --acp`**, using Mneme's
+own `ISessionDistiller`/`IDistiller` (LLM = Copilot) to distill the
+turn-based conversation into epistemic memory.
+
+- [x] **acp-app** — ACP client + in-process mock agent; Mneme wiring via
+  `AddMneme`; two-panel UI (conversation + distilled memory).
+- [x] **acp-corpus** — LoCoMo-shaped corpus replay (Step / timed
+  auto-play), self-contained loader, bundled sample.
+- [x] **acp-reject** — Per-memory reject → `IRevocationService.RevokeAsync`
+  (append-only tombstone).
+- [x] **acp-sleep** — Sleep/consolidate → `IMemoryQueryAPI.DistillAsync`
+  condensed `ContextBundle` overlay.
+- [x] **acp-copilot-llm** — Real GitHub Copilot over `copilot --acp` as
+  the distillation LLM (session + read-side distillers); atomic extracted
+  facts, not verbatim capture. Offline heuristic fallback via
+  `MNEME_AGENT=mock`.
+
+---
+
 ## Cross-cutting / nice-to-have (not blocking any phase)
 
 - [x] **ci-github-actions** — Workflow that runs `dotnet build` +

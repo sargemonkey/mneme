@@ -9,7 +9,64 @@ release notes.
 
 ## [Unreleased]
 
+### Security
+- **Fixed: ingest secret redaction was a silent no-op in DI-wired hosts.**
+  Registering the redactor as `TryAddSingleton<IRedactor, RegexRedactor>()` let
+  the DI container pick `RegexRedactor`'s greedy `IEnumerable<RedactionRule>`
+  constructor and resolve it to an **empty** rule set — so the inline secret
+  redactor (locked decision #11) stripped nothing at ingest. Now registered via a
+  factory (`_ => new RegexRedactor()`) so the default rule set is used. Affected
+  `AddMneme`, `Mneme.Studio`, and `Mneme.Studio.Desktop`; verified with an
+  end-to-end ingest-redaction regression test. Direct `new RegexRedactor()` usage
+  (benchmarks, unit tests) was always correct, which is why this went unnoticed.
+
 ### Added
+- **Cross-agent contradiction detection (Phase 13, ADR-0004):** two currently-
+  valid structured triples with the same `subject_key` + `predicate` but a
+  different `object` are recorded as open candidates in a new
+  `memory_contradictions` projection by a `ContradictionsProjector`, instead of a
+  silent bi-temporal supersession (which assumes sequential observation). Narrow
+  and deterministic (structured triples only, trim/case-insensitive object
+  compare); candidates surface for human review and are never auto-resolved.
+  Schema v14→v15. Tested (`ContradictionDetectionTests`).
+- **Procedural memory / skills (Phase 14, ADR-0004):** a new `SkillPayload`
+  ("how we reliably do X") with its own `projection_skills` read model and
+  `SkillsProjector`. Skills ride in the append-only log under the `Evidence`
+  category (so the seven epistemic categories stay locked) and the projector
+  recognises them by payload type; typically ingested with a `Citation.Derived`
+  provenance. Schema v13→v14. Tested (`SkillProjectionTests`).
+- **Agent/role scope + data-subject primitive (Phase 13, ADR-0004):** an indexed
+  `memory_events.principal_id` column (mirrors provenance author identity) plus a
+  nullable `QuerySpec.Principal` filter. Scopes reads to a single agent/user
+  within a shared workstream and makes "everything principal X authored" an
+  O(index) query — the basis for data-subject access and erasure. Enforced across
+  all read paths (structured, free-text, list-recent). Schema v11→v12.
+- **Read-side visibility tier (Phase 13, ADR-0004):** a `Visibility`
+  (`Private`/`Shared`/`Global`) dimension in a mutable `memory_visibility` sidecar
+  (keyed by event id, so promotion never mutates the append-only log). Sensitive
+  classes (`Pii`/`Confidential`/`Secret`) default to `Private` (author-only);
+  everything else to `Shared`. `Private` events are readable only by their
+  authoring principal — the PII-containment boundary in a shared workstream.
+  Enforced across all read paths. Schema v12→v13.
+- **`Citation.Derived(From[], ConsolidatorId)`** — a new provenance shape on
+  the polymorphic `Citation` set for events derived from *other Mneme events*
+  (the offline consolidation / "dreaming" pass), as opposed to a source signal.
+  Keeps the audit chain intact and projections rebuildable, and lets
+  consolidation operate over Mneme's own event log rather than raw transcripts
+  (preserves the host-owns-the-chat-log invariant). First increment of Phase 14.
+- **ADR-0004** (`docs/adr/0004-multi-agent-and-dreaming.md`, Proposed) —
+  records the design for Phase 13 (multi-agent shared workstreams) and Phase 14
+  (offline dreaming/consolidation), resolves the three locked-decision tensions
+  (conservative entity resolution, seven epistemic categories, "never store raw
+  turns"), and adds a **binding privacy & compliance section** for the
+  single-user → multi-user shift (indexed subject access/erasure, PII-private-
+  by-default visibility, and five consolidator guardrails).
+- **`Mneme.Studio.Agent`** reference consumer (not shipped as a package): a
+  Photino + Blazor desktop app that is an ACP client (`LibAcp`) driving GitHub
+  Copilot over `copilot --acp`, using Mneme's own distillers (LLM = Copilot) to
+  distill a turn-based conversation into epistemic memory. Includes LoCoMo-shaped
+  corpus replay, per-memory reject (revocation), and a sleep/consolidate view.
+
 - **Phases 0–12 implemented** across `Mneme.Contracts`, `Mneme`,
   `Mneme.Agents.AI`, and `Mneme.Mcp`: append-only bi-temporal SQLite event
   log, classification + revocation, projections + FTS5, capability-checked

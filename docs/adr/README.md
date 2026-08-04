@@ -23,6 +23,7 @@ also good ADR candidates.
 | [0001](0001-sqlite-only-embedded-backend.md) | SQLite as the only embedded backend | Accepted |
 | [0002](0002-ichatclient-over-semantic-kernel.md) | `IChatClient` instead of Semantic Kernel | Accepted |
 | [0003](0003-host-owns-chat-log.md) | Host owns the chat log; Mneme owns the interpretation | Accepted |
+| [0004](0004-multi-agent-and-dreaming.md) | Multi-agent shared workstreams + offline "dreaming" consolidation | Proposed |
 
 ## Numbering
 
