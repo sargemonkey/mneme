@@ -72,4 +72,45 @@ public sealed class WorkstreamConfigStore
             _clock.GetUtcNow().UtcDateTime.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
         cmd.ExecuteNonQuery();
     }
+
+    /// <summary>
+    /// Whether <paramref name="workstream"/> has opted in to being mined by the
+    /// cross-workstream consolidation ("fleet dreaming") pass (ADR-0004). Defaults
+    /// to <c>false</c> — a workstream is never mined for the global skill library
+    /// unless it explicitly opts in.
+    /// </summary>
+    public bool GetParticipatesInCrossWorkstreamConsolidation(WorkstreamId workstream)
+    {
+        using var connection = _connections.Open();
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT participates_in_cross_workstream_consolidation
+            FROM workstream_config WHERE workstream_id = $ws;
+            """;
+        cmd.Parameters.AddWithValue("$ws", workstream.Value);
+        var result = cmd.ExecuteScalar();
+        return result is not (null or DBNull)
+            && Convert.ToInt32(result, System.Globalization.CultureInfo.InvariantCulture) != 0;
+    }
+
+    /// <summary>Set (upsert) the cross-workstream-consolidation opt-in for <paramref name="workstream"/>.</summary>
+    public void SetParticipatesInCrossWorkstreamConsolidation(WorkstreamId workstream, bool participates)
+    {
+        WorkstreamIdValidator.EnsureValid(workstream.Value, nameof(workstream));
+        using var connection = _connections.Open();
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO workstream_config(workstream_id, mode, updated_at,
+                participates_in_cross_workstream_consolidation)
+            VALUES ($ws, 0, $updatedAt, $participates)
+            ON CONFLICT(workstream_id) DO UPDATE SET
+                participates_in_cross_workstream_consolidation = excluded.participates_in_cross_workstream_consolidation,
+                updated_at = excluded.updated_at;
+            """;
+        cmd.Parameters.AddWithValue("$ws", workstream.Value);
+        cmd.Parameters.AddWithValue("$participates", participates ? 1 : 0);
+        cmd.Parameters.AddWithValue("$updatedAt",
+            _clock.GetUtcNow().UtcDateTime.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+        cmd.ExecuteNonQuery();
+    }
 }

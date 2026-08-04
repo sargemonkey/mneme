@@ -875,14 +875,15 @@ while keeping every derived memory auditable and boundary-safe.
   concurrent sessions; **proposes** entity merges into the review queue
   (never auto-applies — conservative-entity-resolution locked decision).
   Depends on `phase14-idreamer-dreamjob`.
-- [ ] **phase14-dreamer-guardrails** — Binding privacy acceptance
-  criteria for the consolidator (ADR-0004 §Privacy): (1) classification
-  floor — promote to `global` only from `Public`/`Internal` sources; (2)
-  re-run `IRedactor` on every dreamer-produced event; (3) capability-gate
-  `Citation.Derived` traversal per source workstream; (4) opt-in
-  `workstream_config.ParticipatesInCrossWorkstreamConsolidation` (default
-  false); (5) full audit of `DreamJob` reads/writes. Depends on
-  `phase14-idreamer-dreamjob`.
+- [x] **phase14-dreamer-guardrails** — Operational guardrails. Opt-in
+  `participates_in_cross_workstream_consolidation` flag (default false,
+  `WorkstreamConfigStore`); `DreamGuardrails` classification floor
+  (global/shared only from all-Public/Internal sources); capability-gated
+  `DerivedCitationResolver` (filters `Citation.Derived` sources to the
+  caller's authorized workstreams); `DreamCoordinator.GetAuditTrail` over
+  `dream_runs`. The per-output safety guardrails (re-redact via
+  `IngestAsync`, visibility cap) shipped with the worker. Schema v17.
+  Tested (`DreamGuardrailsTests`). *(shipped)*
 - [ ] **phase14-fleet-global-skills** — Run the dreamer with a
   cross-workstream capability to mine patterns *across* workstreams into
   a `global`-visibility skill library. Depends on

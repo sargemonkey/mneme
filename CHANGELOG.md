@@ -21,6 +21,18 @@ release notes.
   (benchmarks, unit tests) was always correct, which is why this went unnoticed.
 
 ### Added
+- **Dreamer privacy guardrails (Phase 14, ADR-0004):** the operational
+  guardrails around the consolidation worker. A per-workstream opt-in flag
+  `participates_in_cross_workstream_consolidation` (default **false**, on
+  `workstream_config`, via `WorkstreamConfigStore`) so a workstream is never
+  cross-workstream-mined unless it explicitly opts in; a `DreamGuardrails` helper
+  with the reusable **classification floor** (an output may reach shared/global
+  visibility only when every source event is Public/Internal — unknown sources
+  are ineligible); a capability-gated `DerivedCitationResolver` that filters a
+  derived event's `Citation.Derived` sources to only those the caller's token may
+  read (closing the cross-workstream citation back-channel); and a
+  `DreamCoordinator.GetAuditTrail` surface over the `dream_runs` log. Schema
+  v16→v17. Tested (`DreamGuardrailsTests`).
 - **Offline consolidation / "dreaming" worker (Phase 14, ADR-0004):** a third
   host LLM seam `IDreamer` (events → derived events, symmetric to
   `ISessionDistiller` and `IDistiller`) plus a `DreamCoordinator` that loads a

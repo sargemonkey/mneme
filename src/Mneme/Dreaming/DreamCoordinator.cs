@@ -115,7 +115,7 @@ public sealed class DreamCoordinator
             var ingest = await _agent.IngestAsync(envelope, ct).ConfigureAwait(false);
             produced.Add(ingest.EventId);
 
-            var capped = CapVisibility(output.ProposedVisibility, output.DerivedFrom, classes);
+            var capped = DreamGuardrails.CapVisibility(output.ProposedVisibility, output.DerivedFrom, classes);
             SetVisibility(ingest.EventId, workstream, capped);
         }
 
@@ -126,22 +126,34 @@ public sealed class DreamCoordinator
     }
 
     /// <summary>
-    /// The highest visibility an output may receive: forced Private if any source
-    /// is sensitive (Confidential/Secret/Pii), else the dreamer's request honoured
-    /// (up to Global). Missing source classifications are treated conservatively.
+    /// Read the consolidation audit trail for a workstream, newest first
+    /// (ADR-0004: the highest-privilege actor is the most-logged).
     /// </summary>
-    private static Visibility CapVisibility(
-        Visibility proposed, IReadOnlyList<EventId> derivedFrom, IReadOnlyDictionary<string, Mneme.Contracts.Classification> classes)
+    public IReadOnlyList<DreamRunAudit> GetAuditTrail(WorkstreamId workstream, int limit = 100)
     {
-        foreach (var src in derivedFrom)
+        var list = new List<DreamRunAudit>();
+        using var c = _connections.Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = """
+            SELECT run_id, dreamer_id, started_at, events_in, outputs_out
+            FROM dream_runs
+            WHERE workstream_id = $ws
+            ORDER BY started_at DESC
+            LIMIT $n;
+            """;
+        cmd.Parameters.AddWithValue("$ws", workstream.Value);
+        cmd.Parameters.AddWithValue("$n", limit);
+        using var rd = cmd.ExecuteReader();
+        while (rd.Read())
         {
-            var cls = classes.TryGetValue(src.Value, out var c) ? c : Mneme.Contracts.Classification.Confidential;
-            if (cls is Mneme.Contracts.Classification.Confidential or Mneme.Contracts.Classification.Secret or Mneme.Contracts.Classification.Pii)
-            {
-                return Visibility.Private; // one sensitive source floors the whole output
-            }
+            list.Add(new DreamRunAudit(
+                RunId: rd.GetString(0),
+                DreamerId: rd.GetString(1),
+                StartedAt: DateTimeOffset.Parse(rd.GetString(2), CultureInfo.InvariantCulture),
+                EventsIn: rd.GetInt32(3),
+                OutputsOut: rd.GetInt32(4)));
         }
-        return (Visibility)Math.Min((int)proposed, (int)Visibility.Global);
+        return list;
     }
 
     private IReadOnlyList<DistillationEvent> LoadEvents(WorkstreamId ws, int limit)
@@ -288,3 +300,16 @@ public sealed record DreamRunSummary(
     string DreamerId,
     int EventsConsidered,
     IReadOnlyList<EventId> Produced);
+
+/// <summary>One recorded consolidation run from the <c>dream_runs</c> audit log.</summary>
+/// <param name="RunId">The run id.</param>
+/// <param name="DreamerId">The dreamer that ran.</param>
+/// <param name="StartedAt">When the run began.</param>
+/// <param name="EventsIn">How many events were fed to the dreamer.</param>
+/// <param name="OutputsOut">How many derived events were produced.</param>
+public sealed record DreamRunAudit(
+    string RunId,
+    string DreamerId,
+    DateTimeOffset StartedAt,
+    int EventsIn,
+    int OutputsOut);

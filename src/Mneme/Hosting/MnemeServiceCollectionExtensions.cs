@@ -170,6 +170,14 @@ public static class MnemeServiceCollectionExtensions
                 sp.GetService<IDreamer>(),
                 sp.GetRequiredService<TimeProvider>()));
 
+        // Capability-gated traversal of Citation.Derived provenance (ADR-0004
+        // guardrail: following a derived citation must not cross an isolation
+        // boundary the caller could not cross directly).
+        services.TryAddSingleton<Mneme.Dreaming.DerivedCitationResolver>(sp =>
+            new Mneme.Dreaming.DerivedCitationResolver(
+                sp.GetRequiredService<SqliteConnectionFactory>(),
+                sp.GetRequiredService<TimeProvider>()));
+
         var permitted = opts.PermittedCategories?.ToArray()
             ?? Array.Empty<EpistemicCategory>(); // empty == all (per CapabilityToken.Allows)
         var now = DateTimeOffset.UtcNow;

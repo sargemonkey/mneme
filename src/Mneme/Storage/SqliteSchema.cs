@@ -27,7 +27,7 @@ namespace Mneme.Storage;
 public static class SqliteSchema
 {
     /// <summary>Current schema version. Bumped when the DDL changes incompatibly.</summary>
-    public const int Version = 16;
+    public const int Version = 17;
 
     /// <summary>
     /// Idempotently create all Phase 1 tables, indexes, and the
@@ -62,6 +62,12 @@ public static class SqliteSchema
             "ALTER TABLE memory_events ADD COLUMN principal_id TEXT;");
         TryAlter(connection, tx,
             "CREATE INDEX IF NOT EXISTS idx_memory_events_principal ON memory_events(workstream_id, principal_id);");
+
+        // Schema v17 migration: cross-workstream-consolidation opt-in (ADR-0004).
+        // Default 0 (not participating) so a workstream is never fleet-mined
+        // unless it explicitly opts in.
+        TryAlter(connection, tx,
+            "ALTER TABLE workstream_config ADD COLUMN participates_in_cross_workstream_consolidation INTEGER NOT NULL DEFAULT 0;");
 
         using (var cmd = connection.CreateCommand())
         {
@@ -592,7 +598,8 @@ public static class SqliteSchema
         CREATE TABLE IF NOT EXISTS workstream_config (
             workstream_id TEXT NOT NULL PRIMARY KEY,
             mode          INTEGER NOT NULL DEFAULT 0,
-            updated_at    TEXT NOT NULL
+            updated_at    TEXT NOT NULL,
+            participates_in_cross_workstream_consolidation INTEGER NOT NULL DEFAULT 0
         ) WITHOUT ROWID;
 
         CREATE TABLE IF NOT EXISTS review_queue (
