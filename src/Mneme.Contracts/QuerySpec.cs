@@ -14,6 +14,7 @@ namespace Mneme.Contracts;
 /// <param name="To">Inclusive upper bound on <see cref="CaptureEvent.ValidAt"/>.</param>
 /// <param name="AsOf">Bi-temporal "as of" date. Query returns the state Mneme knew at this instant. <c>null</c> = current state.</param>
 /// <param name="Limit">Maximum number of results to return. Hard upper bound enforced by the agent.</param>
+/// <param name="Principal">Optional author filter — only events authored by this principal (agent/user). <c>null</c> = any author. Scopes reads to a single agent/role within a shared workstream, and backs O(index) data-subject access. See ADR-0004.</param>
 public sealed record QuerySpec(
     WorkstreamId? Workstream,
     IReadOnlyCollection<EpistemicCategory>? Categories = null,
@@ -23,7 +24,8 @@ public sealed record QuerySpec(
     DateTimeOffset? From = null,
     DateTimeOffset? To = null,
     DateTimeOffset? AsOf = null,
-    int Limit = 50);
+    int Limit = 50,
+    PrincipalId? Principal = null);
 
 /// <summary>
 /// Wraps a <see cref="QuerySpec"/> with execution-time flags (e.g., diagnostic

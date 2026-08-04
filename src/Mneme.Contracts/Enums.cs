@@ -96,6 +96,27 @@ public enum CurationType
 }
 
 /// <summary>
+/// Where a projected memory may be read from. A read-side containment
+/// boundary layered on top of workstream isolation (ADR-0004): sensitive
+/// classes default to <see cref="Private"/> (author-only) and must be
+/// explicitly promoted to <see cref="Shared"/>. Distinct from
+/// <see cref="Classification"/>, which labels sensitivity; visibility governs
+/// <em>reach</em>. Stored in the mutable <c>memory_visibility</c> sidecar (not
+/// on the append-only event log), so promotion doesn't mutate the log.
+/// </summary>
+public enum Visibility
+{
+    /// <summary>Author-only: readable solely by the principal that produced it.</summary>
+    Private = 0,
+
+    /// <summary>Readable by anyone authorized for the workstream. The default for non-sensitive events.</summary>
+    Shared = 1,
+
+    /// <summary>Readable across workstreams (e.g., a promoted global skill). Set only by curation / consolidation.</summary>
+    Global = 2,
+}
+
+/// <summary>
 /// Per-workstream policy for whether captured events go straight to
 /// distillation or wait for human review.
 /// </summary>

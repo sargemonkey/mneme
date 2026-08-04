@@ -128,6 +128,7 @@ public sealed class EventPayloadTests
             new GoalPayload("g", GoalState.Active),
             new ActionPayload("a", null, null),
             new OutcomePayload("o", new EventId("x"), OutcomePolarity.Neutral),
+            new SkillPayload("s", "do the thing", "when needed", Array.Empty<EventId>()),
         };
 
         foreach (var p in all)

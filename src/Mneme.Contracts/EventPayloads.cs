@@ -22,6 +22,7 @@ namespace Mneme.Contracts;
 [JsonDerivedType(typeof(GoalPayload), nameof(GoalPayload))]
 [JsonDerivedType(typeof(ActionPayload), nameof(ActionPayload))]
 [JsonDerivedType(typeof(OutcomePayload), nameof(OutcomePayload))]
+[JsonDerivedType(typeof(SkillPayload), nameof(SkillPayload))]
 public abstract record EventPayload
 {
     /// <summary>The epistemic category this payload belongs to. Set by each derived record.</summary>
@@ -163,4 +164,32 @@ public enum OutcomePolarity
     Neutral = 0,
     /// <summary>Outcome was favorable.</summary>
     Positive = 1,
+}
+
+/// <summary>
+/// A reusable <em>procedural</em> memory — "how we reliably do X" — distilled by
+/// the offline consolidation ("dreaming") pass from recurring patterns across
+/// prior events. Procedural memory is deliberately modelled as its own payload
+/// type with its own projection (<c>projection_skills</c>) rather than as an
+/// eighth <see cref="EpistemicCategory"/>: the seven epistemic categories are a
+/// locked part of the data model (ADR-0004 §Tension 2). A skill's
+/// <see cref="Category"/> is <see cref="EpistemicCategory.Evidence"/> so it
+/// still lives in the append-only log under one of the seven, while a dedicated
+/// <c>SkillsProjector</c> recognises it by payload type. A skill is typically
+/// ingested with a <see cref="Citation.Derived"/> provenance naming the events
+/// it was distilled from.
+/// </summary>
+/// <param name="Name">Short, imperative title (e.g., "resolve gateway double-charge").</param>
+/// <param name="Procedure">The how-to itself — the steps or approach that reliably works.</param>
+/// <param name="Trigger">Optional context that signals when this skill applies (e.g., "when the payment gateway double-charges on retry").</param>
+/// <param name="SupportingEvents">Events this skill was distilled from. May be empty when asserted directly.</param>
+public sealed record SkillPayload(
+    string Name,
+    string Procedure,
+    string? Trigger,
+    IReadOnlyList<EventId> SupportingEvents)
+    : EventPayload
+{
+    /// <inheritdoc/>
+    public override EpistemicCategory Category => EpistemicCategory.Evidence;
 }

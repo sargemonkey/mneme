@@ -32,6 +32,7 @@ namespace Mneme.Contracts;
 [JsonDerivedType(typeof(Manual), nameof(Manual))]
 [JsonDerivedType(typeof(Workflow), nameof(Workflow))]
 [JsonDerivedType(typeof(External), nameof(External))]
+[JsonDerivedType(typeof(Derived), nameof(Derived))]
 public abstract record Citation
 {
     /// <summary>
@@ -74,4 +75,27 @@ public abstract record Citation
     /// <param name="ExternalId">Stable id of the event in the external system.</param>
     /// <param name="Href">Optional URL to the source record for audit / drill-down.</param>
     public sealed record External(string SystemName, string ExternalId, Uri? Href) : Citation;
+
+    /// <summary>
+    /// Consolidation citation: an event derived from <em>other Mneme events</em>
+    /// rather than from a source signal. Emitted by the offline consolidation
+    /// ("dreaming") pass when it abstracts, deduplicates, or reconciles existing
+    /// memory into a new event (e.g., a cross-session synthesis or an extracted
+    /// skill). Naming the source events keeps the audit chain intact and the
+    /// projections rebuildable, and — crucially — lets consolidation operate
+    /// over Mneme's own epistemic log, never over raw transcripts (the
+    /// host-owns-the-chat-log invariant, ADR-0003). If deeper detail is needed,
+    /// the consolidator re-resolves an underlying <see cref="SessionRange"/>
+    /// through the host on demand.
+    /// </summary>
+    /// <remarks>
+    /// Traversing <paramref name="From"/> is capability-gated per source event's
+    /// workstream (ADR-0004): following a derived citation must not cross an
+    /// isolation boundary the caller could not cross directly.
+    /// </remarks>
+    /// <param name="From">The Mneme events this event was derived from. Must be non-empty.</param>
+    /// <param name="ConsolidatorId">Stable identifier of the consolidator / dreamer that produced this event (model + prompt revision), mirroring the distiller-id provenance on distilled events.</param>
+    public sealed record Derived(
+        IReadOnlyList<EventId> From,
+        string ConsolidatorId) : Citation;
 }
