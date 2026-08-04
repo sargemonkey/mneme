@@ -78,7 +78,7 @@ public static class MnemeServiceCollectionExtensions
         }
 
         services.AddSingleton(factory);
-        services.TryAddSingleton<IRedactor, RegexRedactor>();
+        services.TryAddSingleton<IRedactor>(_ => new RegexRedactor());
         services.TryAddSingleton<IContentShapeSelector, AlwaysRedactedContent>();
         services.TryAddSingleton<IClassifier, RuleBasedClassifier>();
         services.TryAddSingleton<TimeProvider>(TimeProvider.System);

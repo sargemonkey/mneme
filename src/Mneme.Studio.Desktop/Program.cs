@@ -69,7 +69,7 @@ internal static class Program
         }
 
         builder.Services.AddSingleton(factory);
-        builder.Services.AddSingleton<IRedactor, RegexRedactor>();
+        builder.Services.AddSingleton<IRedactor>(_ => new RegexRedactor());
         builder.Services.AddSingleton<IContentShapeSelector, AlwaysRedactedContent>();
         builder.Services.AddSingleton<IClassifier, RuleBasedClassifier>();
         builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);

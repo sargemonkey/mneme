@@ -26,7 +26,7 @@ using (var bootstrap = factory.Open())
 }
 
 builder.Services.AddSingleton(factory);
-builder.Services.AddSingleton<IRedactor, RegexRedactor>();
+builder.Services.AddSingleton<IRedactor>(_ => new RegexRedactor());
 builder.Services.AddSingleton<IContentShapeSelector, AlwaysRedactedContent>();
 builder.Services.AddSingleton<Mneme.Classification.IClassifier, Mneme.Classification.RuleBasedClassifier>();
 builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
