@@ -98,7 +98,8 @@ internal static class CapabilityEnforcement
         return new ResolvedCapability(
             EffectiveCategories: effective,
             CrossWorkstream: crossOk && requested is null,
-            ScopeWorkstream: requested);
+            ScopeWorkstream: requested,
+            Viewer: token.Principal);
     }
 }
 
@@ -106,7 +107,9 @@ internal static class CapabilityEnforcement
 /// <param name="EffectiveCategories">Categories the query may return (intersection of token + request).</param>
 /// <param name="CrossWorkstream">True if the query is operating cross-workstream.</param>
 /// <param name="ScopeWorkstream">When non-null, the single workstream the query is scoped to.</param>
+/// <param name="Viewer">The principal performing the query — used to enforce author-only (<see cref="Visibility.Private"/>) reads.</param>
 internal sealed record ResolvedCapability(
     IReadOnlyCollection<EpistemicCategory> EffectiveCategories,
     bool CrossWorkstream,
-    WorkstreamId? ScopeWorkstream);
+    WorkstreamId? ScopeWorkstream,
+    PrincipalId Viewer);

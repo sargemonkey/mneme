@@ -253,15 +253,18 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
                    r.revoked_at IS NOT NULL AS is_revoked
             FROM memory_events e
             LEFT JOIN memory_revocations r ON r.event_id = e.event_id
+            LEFT JOIN memory_visibility v ON v.event_id = e.event_id
             WHERE e.workstream_id = $ws
               AND e.event_channel = 0
               AND e.category IN (SELECT value FROM json_each($cats))
+              AND (COALESCE(v.visibility, 1) >= 1 OR e.principal_id = $viewer)
             ORDER BY e.created_at DESC
             LIMIT $limit;
             """;
         cmd.Parameters.AddWithValue("$ws", workstream.Value);
         cmd.Parameters.AddWithValue("$cats", System.Text.Json.JsonSerializer.Serialize(
             resolved.EffectiveCategories.Select(x => (int)x).ToArray()));
+        cmd.Parameters.AddWithValue("$viewer", resolved.Viewer.Value);
         cmd.Parameters.AddWithValue("$limit", limit);
 
         var results = new List<QueryResultItem>(limit);
@@ -308,12 +311,15 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
                    r.revoked_at IS NOT NULL AS is_revoked
             FROM memory_events e
             LEFT JOIN memory_revocations r ON r.event_id = e.event_id
+            LEFT JOIN memory_visibility v ON v.event_id = e.event_id
             WHERE e.event_channel = $channel
               AND {categoryPredicate}
               AND (e.valid_at >= $from OR $from IS NULL)
               AND (e.valid_at <= $to   OR $to   IS NULL)
               AND ($asOf IS NULL OR e.created_at <= $asOf)
               AND ($asOf IS NULL OR e.invalid_at IS NULL OR e.invalid_at >  $asOf)
+              AND ($principal IS NULL OR e.principal_id = $principal)
+              AND (COALESCE(v.visibility, 1) >= 1 OR e.principal_id = $viewer)
             """);
         if (!resolved.CrossWorkstream)
         {
@@ -335,6 +341,8 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
         cmd.Parameters.AddWithValue("$from", (object?)spec.From?.UtcDateTime.ToString("O", System.Globalization.CultureInfo.InvariantCulture) ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$to", (object?)spec.To?.UtcDateTime.ToString("O", System.Globalization.CultureInfo.InvariantCulture) ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$asOf", (object?)spec.AsOf?.UtcDateTime.ToString("O", System.Globalization.CultureInfo.InvariantCulture) ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$principal", (object?)spec.Principal?.Value ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$viewer", resolved.Viewer.Value);
         if (!resolved.CrossWorkstream)
         {
             cmd.Parameters.AddWithValue("$ws", spec.Workstream!.Value.Value);
@@ -397,6 +405,10 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
         {
             if (!rows.TryGetValue(hit.EventId.Value, out var row)) { gated++; continue; }
             if (row.Workstream != workstream) { gated++; continue; }
+            if (spec.Principal is { } principal && row.Principal != principal.Value) { gated++; continue; }
+            // Visibility: Private (0) is author-only; missing row defaults to Shared.
+            if ((row.Visibility ?? (int)Visibility.Shared) < (int)Visibility.Shared
+                && row.Principal != resolved.Viewer.Value) { gated++; continue; }
             var category = (EpistemicCategory)row.Category;
             if (!resolved.EffectiveCategories.Contains(category)) { gated++; continue; }
             var channel = (EventChannel)row.Channel;
@@ -503,6 +515,10 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
 
             if (!rows.TryGetValue(cand.EventId, out var row)) { gated++; continue; }
             if (row.Workstream != workstream.Value) { gated++; continue; }
+            if (spec.Principal is { } principal && row.Principal != principal.Value) { gated++; continue; }
+            // Visibility: Private (0) is author-only; missing row defaults to Shared.
+            if ((row.Visibility ?? (int)Visibility.Shared) < (int)Visibility.Shared
+                && row.Principal != resolved.Viewer.Value) { gated++; continue; }
             var category = (EpistemicCategory)row.Category;
             if (!resolved.EffectiveCategories.Contains(category)) { gated++; continue; }
             var channel = (EventChannel)row.Channel;
@@ -557,7 +573,8 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
     // per candidate. Columns match what the retrieval gating needs.
     private readonly record struct EventRow(
         string Workstream, int Category, string ValidAt, string CreatedAt,
-        string PayloadJson, int Channel, string? InvalidAt, string? RevokedAt);
+        string PayloadJson, int Channel, string? InvalidAt, string? RevokedAt,
+        string? Principal, int? Visibility);
 
     private Dictionary<string, EventRow> LoadEventRows(SqliteConnection c, IEnumerable<string> eventIds)
     {
@@ -567,9 +584,11 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
         using var cmd = c.CreateCommand();
         cmd.CommandText = """
             SELECT e.event_id, e.workstream_id, e.category, e.valid_at, e.created_at,
-                   e.payload_json, e.event_channel, e.invalid_at, r.revoked_at
+                   e.payload_json, e.event_channel, e.invalid_at, r.revoked_at, e.principal_id,
+                   v.visibility
             FROM memory_events e
             LEFT JOIN memory_revocations r ON r.event_id = e.event_id
+            LEFT JOIN memory_visibility v ON v.event_id = e.event_id
             WHERE e.event_id IN (SELECT value FROM json_each($ids));
             """;
         cmd.Parameters.AddWithValue("$ids", System.Text.Json.JsonSerializer.Serialize(ids));
@@ -580,7 +599,9 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
                 rd.GetString(1), rd.GetInt32(2), rd.GetString(3), rd.GetString(4),
                 rd.GetString(5), rd.GetInt32(6),
                 rd.IsDBNull(7) ? null : rd.GetString(7),
-                rd.IsDBNull(8) ? null : rd.GetString(8));
+                rd.IsDBNull(8) ? null : rd.GetString(8),
+                rd.IsDBNull(9) ? null : rd.GetString(9),
+                rd.IsDBNull(10) ? null : rd.GetInt32(10));
         }
         return map;
     }
@@ -692,6 +713,7 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
         GoalPayload g       => Trim(g.Statement, 200),
         ActionPayload a     => Trim(a.Statement, 200),
         OutcomePayload o    => Trim(o.Statement, 200),
+        SkillPayload s      => Trim("Skill: " + s.Name, 200),
         _                   => "(unknown payload)",
     };
 

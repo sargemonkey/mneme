@@ -38,9 +38,11 @@ public sealed class ProjectorPipeline
     {
         new FactsProjector(),
         new FactTriplesProjector(),
+        new ContradictionsProjector(),
         new DecisionsProjector(),
         new GoalsProjector(),
         new HypothesesProjector(),
+        new SkillsProjector(),
     };
 
     /// <summary>Apply every projector that matches the event's category. Idempotent.</summary>

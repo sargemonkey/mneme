@@ -27,6 +27,7 @@ public sealed class TextSearchIngestObserver : IIngestObserver
         GoalPayload g       => g.Statement,
         ActionPayload a     => a.Statement + " " + (a.ExternalReference ?? string.Empty),
         OutcomePayload o    => o.Statement,
+        SkillPayload s      => s.Name + " " + s.Procedure + " " + (s.Trigger ?? string.Empty),
         _                   => string.Empty,
     };
 }

@@ -60,14 +60,20 @@ public sealed class ProjectorPipelineTests
             TimeProvider.System,
             new[] { (IIngestObserver)observer });
 
-        // Evidence event — no projector consumes it.
+        // Evidence event — the fact/decision/goal/hypothesis projectors skip it
+        // (category mismatch). The skills projector matches the Evidence category
+        // but type-filters the non-skill payload, so it writes no row.
         await agent.IngestAsync(TestFixtures.NewEvidence(eventId: "proj-evid-001"));
 
         using var c = db.Factory.Open();
         using var cmd = c.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM projection_facts;";
         Assert.Equal(0L, (long)cmd.ExecuteScalar()!);
-        cmd.CommandText = "SELECT COUNT(*) FROM event_processing_log;";
+        cmd.CommandText = "SELECT COUNT(*) FROM projection_skills;";
+        Assert.Equal(0L, (long)cmd.ExecuteScalar()!);
+        // Only the skills projector matches the Evidence category (as a no-op here);
+        // the other default projectors don't match and log nothing.
+        cmd.CommandText = "SELECT COUNT(*) FROM event_processing_log WHERE projection_name <> 'skills';";
         Assert.Equal(0L, (long)cmd.ExecuteScalar()!);
     }
 

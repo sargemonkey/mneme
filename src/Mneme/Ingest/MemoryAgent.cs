@@ -175,6 +175,7 @@ public sealed class MemoryAgent : IMemoryAgent
             ProvenanceJson: EventSerialization.SerializeProvenance(evt.Provenance),
             Shape: shape,
             Classification: label,
+            Principal: evt.Provenance.Principal,
             ArtifactId: null);
 
         var wasDuplicate = Persist(record);
@@ -274,6 +275,7 @@ public sealed class MemoryAgent : IMemoryAgent
         GoalPayload g       => g.Statement,
         ActionPayload a     => a.Statement,
         OutcomePayload o    => o.Statement,
+        SkillPayload s      => s.Name + "\n" + s.Procedure + (s.Trigger is null ? "" : "\n" + s.Trigger),
         _                   => string.Empty,
     };
 
@@ -304,11 +306,13 @@ public sealed class MemoryAgent : IMemoryAgent
             INSERT INTO memory_events(
                 event_id, workstream_id, event_channel, category,
                 schema_version, valid_at, invalid_at, created_at, expired_at,
-                payload_json, provenance_json, content_shape, classification, artifact_id)
+                payload_json, provenance_json, content_shape, classification,
+                principal_id, artifact_id)
             VALUES (
                 $eventId, $workstreamId, $channel, $category,
                 $schemaVersion, $validAt, $invalidAt, $createdAt, $expiredAt,
-                $payloadJson, $provenanceJson, $contentShape, $classification, $artifactId)
+                $payloadJson, $provenanceJson, $contentShape, $classification,
+                $principalId, $artifactId)
             ON CONFLICT(event_id) DO NOTHING;
             """;
         cmd.Parameters.AddWithValue("$eventId", r.EventId.Value);
@@ -326,6 +330,7 @@ public sealed class MemoryAgent : IMemoryAgent
         cmd.Parameters.AddWithValue("$provenanceJson", r.ProvenanceJson);
         cmd.Parameters.AddWithValue("$contentShape", (int)r.Shape);
         cmd.Parameters.AddWithValue("$classification", (int)r.Classification);
+        cmd.Parameters.AddWithValue("$principalId", r.Principal.Value);
         cmd.Parameters.AddWithValue("$artifactId", (object?)r.ArtifactId ?? DBNull.Value);
         var inserted = cmd.ExecuteNonQuery();
 
@@ -342,6 +347,24 @@ public sealed class MemoryAgent : IMemoryAgent
             enq.Parameters.AddWithValue("$workstreamId", r.WorkstreamId.Value);
             enq.Parameters.AddWithValue("$enqueuedAt", FormatTimestamp(r.CreatedAt));
             enq.ExecuteNonQuery();
+
+            // v13: stamp the default visibility (ADR-0004). Sensitive classes are
+            // author-only (Private); everything else is Shared. Written here in the
+            // sync stage — not by the async projector — so a sensitive event is
+            // never briefly queryable as Shared before a projector runs. Promotion
+            // to Shared/Global is a later curation/consolidation step.
+            using var vis = connection.CreateCommand();
+            vis.Transaction = tx;
+            vis.CommandText = """
+                INSERT INTO memory_visibility(event_id, workstream_id, visibility, set_at)
+                VALUES ($eventId, $workstreamId, $visibility, $setAt)
+                ON CONFLICT(event_id) DO NOTHING;
+                """;
+            vis.Parameters.AddWithValue("$eventId", r.EventId.Value);
+            vis.Parameters.AddWithValue("$workstreamId", r.WorkstreamId.Value);
+            vis.Parameters.AddWithValue("$visibility", (int)DefaultVisibility(r.Classification));
+            vis.Parameters.AddWithValue("$setAt", FormatTimestamp(r.CreatedAt));
+            vis.ExecuteNonQuery();
         }
 
         tx.Commit();
@@ -350,6 +373,19 @@ public sealed class MemoryAgent : IMemoryAgent
 
     internal static string FormatTimestamp(DateTimeOffset t) =>
         t.UtcDateTime.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// The visibility a freshly-ingested event receives (ADR-0004): sensitive
+    /// classes are author-only (<see cref="Visibility.Private"/>); everything
+    /// else is <see cref="Visibility.Shared"/>. Promotion is a later step.
+    /// </summary>
+    public static Visibility DefaultVisibility(Mneme.Contracts.Classification classification) => classification switch
+    {
+        Mneme.Contracts.Classification.Pii => Visibility.Private,
+        Mneme.Contracts.Classification.Confidential => Visibility.Private,
+        Mneme.Contracts.Classification.Secret => Visibility.Private,
+        _ => Visibility.Shared,
+    };
 
     private sealed record EventRecord(
         EventId EventId,
@@ -365,5 +401,6 @@ public sealed class MemoryAgent : IMemoryAgent
         string ProvenanceJson,
         ContentShape Shape,
         Mneme.Contracts.Classification Classification,
+        PrincipalId Principal,
         string? ArtifactId);
 }

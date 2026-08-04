@@ -200,6 +200,7 @@ public static class DistillationPromptBuilder
         GoalPayload g       => g.Statement,
         ActionPayload a     => a.Statement,
         OutcomePayload o    => o.Statement,
+        SkillPayload s      => s.Name + (string.IsNullOrEmpty(s.Procedure) ? "" : " — " + s.Procedure),
         _ => string.Empty,
     };
 

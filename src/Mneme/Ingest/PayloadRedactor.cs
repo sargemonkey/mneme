@@ -88,6 +88,23 @@ internal static class PayloadRedactor
                 var r = redactor.Redact(o.Statement);
                 return (o with { Statement = r.RedactedContent }, r.HadHits, r.Hits.Count);
             }
+            case SkillPayload s:
+            {
+                var rn = redactor.Redact(s.Name);
+                var rp = redactor.Redact(s.Procedure);
+                var had = rn.HadHits || rp.HadHits;
+                var hits = rn.Hits.Count + rp.Hits.Count;
+                string? trigger = s.Trigger;
+                if (trigger is not null)
+                {
+                    var rt = redactor.Redact(trigger);
+                    trigger = rt.RedactedContent;
+                    had |= rt.HadHits;
+                    hits += rt.Hits.Count;
+                }
+                return (s with { Name = rn.RedactedContent, Procedure = rp.RedactedContent, Trigger = trigger },
+                        had, hits);
+            }
             default:
                 throw new NotSupportedException(
                     $"Unknown payload type {payload.GetType().FullName}. Add a case to PayloadRedactor.");

@@ -263,11 +263,13 @@ public sealed class SqliteReviewQueue : IReviewQueue
             INSERT INTO memory_events(
                 event_id, workstream_id, event_channel, category,
                 schema_version, valid_at, invalid_at, created_at, expired_at,
-                payload_json, provenance_json, content_shape, classification, artifact_id)
+                payload_json, provenance_json, content_shape, classification,
+                principal_id, artifact_id)
             VALUES (
                 $eventId, $workstreamId, $channel, $category,
                 1, $now, NULL, $now, NULL,
-                $payloadJson, $provenanceJson, 0, $classification, NULL)
+                $payloadJson, $provenanceJson, 0, $classification,
+                $principalId, NULL)
             ON CONFLICT(event_id) DO NOTHING;
             """;
         cmd.Parameters.AddWithValue("$eventId",
@@ -279,6 +281,7 @@ public sealed class SqliteReviewQueue : IReviewQueue
         cmd.Parameters.AddWithValue("$payloadJson", EventSerialization.SerializePayload(payload));
         cmd.Parameters.AddWithValue("$provenanceJson", EventSerialization.SerializeProvenance(provenance));
         cmd.Parameters.AddWithValue("$classification", (int)Contracts.Classification.Internal);
+        cmd.Parameters.AddWithValue("$principalId", provenance.Principal.Value);
         cmd.ExecuteNonQuery();
     }
 

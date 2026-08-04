@@ -27,7 +27,7 @@ namespace Mneme.Storage;
 public static class SqliteSchema
 {
     /// <summary>Current schema version. Bumped when the DDL changes incompatibly.</summary>
-    public const int Version = 11;
+    public const int Version = 15;
 
     /// <summary>
     /// Idempotently create all Phase 1 tables, indexes, and the
@@ -55,6 +55,13 @@ public static class SqliteSchema
         // the duplicate-column error rather than feature-detect).
         TryAlter(connection, tx,
             "ALTER TABLE memory_events ADD COLUMN classification INTEGER NOT NULL DEFAULT 0;");
+
+        // Schema v12 migration: add the indexed author-identity column. Existing
+        // rows keep NULL (their author is still recoverable from provenance_json).
+        TryAlter(connection, tx,
+            "ALTER TABLE memory_events ADD COLUMN principal_id TEXT;");
+        TryAlter(connection, tx,
+            "CREATE INDEX IF NOT EXISTS idx_memory_events_principal ON memory_events(workstream_id, principal_id);");
 
         using (var cmd = connection.CreateCommand())
         {
@@ -129,6 +136,7 @@ public static class SqliteSchema
             provenance_json TEXT NOT NULL,
             content_shape   INTEGER NOT NULL,
             classification  INTEGER NOT NULL DEFAULT 0,
+            principal_id    TEXT,
             artifact_id     TEXT,
             FOREIGN KEY (artifact_id) REFERENCES memory_artifacts(artifact_id)
         ) WITHOUT ROWID;
@@ -141,6 +149,11 @@ public static class SqliteSchema
             ON memory_events(workstream_id, category, valid_at);
         CREATE INDEX IF NOT EXISTS idx_memory_events_valid_at
             ON memory_events(valid_at);
+        -- v12: indexed author identity for agent/role-scoped queries and for
+        -- O(index) data-subject access / erasure (ADR-0004). Mirrors
+        -- provenance_json.Principal; NULL on rows written before v12.
+        CREATE INDEX IF NOT EXISTS idx_memory_events_principal
+            ON memory_events(workstream_id, principal_id);
 
         CREATE TABLE IF NOT EXISTS memory_edges (
             edge_id         TEXT NOT NULL PRIMARY KEY,
@@ -190,6 +203,22 @@ public static class SqliteSchema
 
         CREATE INDEX IF NOT EXISTS idx_memory_revocations_workstream
             ON memory_revocations(workstream_id, revoked_at);
+
+        -- v13: read-side visibility tier (ADR-0004). A mutable sidecar keyed by
+        -- event_id, so promotion (private→shared/global) never touches the
+        -- append-only log. Written at ingest with a default derived from the
+        -- event's classification; absent row = Shared (legacy events stay
+        -- readable). visibility: 0=Private (author-only), 1=Shared, 2=Global.
+        CREATE TABLE IF NOT EXISTS memory_visibility (
+            event_id        TEXT NOT NULL PRIMARY KEY,
+            workstream_id   TEXT NOT NULL,
+            visibility      INTEGER NOT NULL,
+            set_at          TEXT NOT NULL,
+            FOREIGN KEY (event_id) REFERENCES memory_events(event_id)
+        ) WITHOUT ROWID;
+
+        CREATE INDEX IF NOT EXISTS idx_memory_visibility_workstream
+            ON memory_visibility(workstream_id, visibility);
 
         -- Phase 3 — projections. Read-models derived from memory_events.
         -- Rebuildable from scratch by replaying the log; updated
@@ -266,6 +295,27 @@ public static class SqliteSchema
         ) WITHOUT ROWID;
         CREATE INDEX IF NOT EXISTS idx_projection_hypotheses_state
             ON projection_hypotheses(workstream_id, state);
+
+        -- v14: procedural memory (ADR-0004 §Tension 2). A skill is a SkillPayload
+        -- event (category Evidence, so the seven epistemic categories stay
+        -- locked); the SkillsProjector recognises it by payload type and writes
+        -- here. Derived + rebuildable from memory_events.
+        CREATE TABLE IF NOT EXISTS projection_skills (
+            workstream_id   TEXT NOT NULL,
+            event_id        TEXT NOT NULL,
+            name            TEXT NOT NULL,
+            procedure       TEXT NOT NULL,
+            trigger         TEXT,
+            supporting_events_json TEXT NOT NULL,
+            classification  INTEGER NOT NULL DEFAULT 0,
+            valid_at        TEXT NOT NULL,
+            created_at      TEXT NOT NULL,
+            revoked_at      TEXT,
+            PRIMARY KEY (workstream_id, event_id),
+            FOREIGN KEY (event_id) REFERENCES memory_events(event_id)
+        ) WITHOUT ROWID;
+        CREATE INDEX IF NOT EXISTS idx_projection_skills_workstream
+            ON projection_skills(workstream_id, valid_at);
 
         -- Per-projection processing log. Lets a single projection be
         -- replayed in isolation without rebuilding everything else.
@@ -500,6 +550,30 @@ public static class SqliteSchema
             ON projection_fact_triples(workstream_id, subject_key);
         CREATE INDEX IF NOT EXISTS idx_fact_triples_subject_entity
             ON projection_fact_triples(workstream_id, subject_entity_id);
+
+        -- v15: cross-agent contradiction candidates (ADR-0004 / Phase 13).
+        -- Two currently-valid triples with the same subject_key + predicate but a
+        -- different object are a *conflict*, not a bi-temporal supersession (which
+        -- assumes sequential observation). The ContradictionsProjector records
+        -- them here as open candidates for human review instead of silently
+        -- picking a winner. Derived + rebuildable from projection_fact_triples.
+        -- event_id_a/object_a is the earlier-sorted event id (deterministic pair).
+        CREATE TABLE IF NOT EXISTS memory_contradictions (
+            workstream_id TEXT NOT NULL,
+            subject_key   TEXT NOT NULL,
+            predicate     TEXT NOT NULL,
+            event_id_a    TEXT NOT NULL,
+            object_a      TEXT NOT NULL,
+            event_id_b    TEXT NOT NULL,
+            object_b      TEXT NOT NULL,
+            detected_at   TEXT NOT NULL,
+            status        INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (workstream_id, subject_key, predicate, event_id_a, event_id_b),
+            FOREIGN KEY (event_id_a) REFERENCES memory_events(event_id),
+            FOREIGN KEY (event_id_b) REFERENCES memory_events(event_id)
+        ) WITHOUT ROWID;
+        CREATE INDEX IF NOT EXISTS idx_memory_contradictions_status
+            ON memory_contradictions(workstream_id, status);
 
         CREATE TABLE IF NOT EXISTS workstream_config (
             workstream_id TEXT NOT NULL PRIMARY KEY,
