@@ -1,0 +1,274 @@
+@page "/"
+@rendermode InteractiveServer
+@implements IDisposable
+@inject AgentChatService Chat
+@using Mneme.Contracts
+@using Mneme.Studio.Agent.Corpus
+
+<PageTitle>Mneme × ACP</PageTitle>
+
+<div class="app">
+    <header class="hdr">
+        <div class="title">
+            <h1>Mneme <span class="x">×</span> ACP</h1>
+            <button class="sleep" @onclick="Sleep" disabled="@_sleeping">
+                @(_sleeping ? "💤 consolidating…" : "😴 Sleep — condense memory")
+            </button>
+        </div>
+        <div class="meta">
+            agent: <code>@Chat.AgentName</code> ·
+            distiller: <code>@Chat.DistillerLabel</code> ·
+            workstream: <code>@Chat.Workstream.Value</code> ·
+            watermark: <code>@Chat.LastWatermark</code> ·
+            distilled: <strong>@Chat.TotalDistilled</strong> · dropped: <strong>@Chat.TotalDropped</strong>
+        </div>
+    </header>
+
+    <div class="cols">
+        <section class="chat">
+            <div class="corpus-bar">
+                <select @bind="_selectedId" disabled="@(_playing || _corpus.Count == 0)">
+                    @if (_corpus.Count == 0)
+                    {
+                        <option value="">(no corpus found)</option>
+                    }
+                    @foreach (var c in _corpus)
+                    {
+                        <option value="@c.Id">@c.Title</option>
+                    }
+                </select>
+                <button @onclick="LoadCorpus" disabled="@(_playing || string.IsNullOrEmpty(_selectedId))">Load</button>
+                <button @onclick="Step" disabled="@(_playing || !HasNext)">Step ▶</button>
+                @if (_playing)
+                {
+                    <button @onclick="Pause">⏸ Pause</button>
+                }
+                else
+                {
+                    <button @onclick="Play" disabled="@(!HasNext)">▶ Auto</button>
+                }
+                <select @bind="_intervalMs" disabled="@_playing" title="playback speed">
+                    <option value="1500">fast (1.5s)</option>
+                    <option value="2500">normal (2.5s)</option>
+                    <option value="4000">slow (4s)</option>
+                </select>
+                @if (_loaded is not null)
+                {
+                    <span class="progress">@_cursor / @_loaded.Turns.Count turns</span>
+                }
+                @if (_busy)
+                {
+                    <span class="busy">⏳ distilling…</span>
+                }
+            </div>
+
+            <h2>Conversation <small>(the host owns this — Mneme never stores it)</small></h2>
+            <div class="turns">
+                @foreach (var t in Chat.Transcript)
+                {
+                    <div class="turn @(t.Role == "user" ? "user" : "other")">
+                        <div class="who">@(t.Role == "user" ? "You" : t.Role)</div>
+                        <div class="bubble">@t.Text</div>
+                    </div>
+                }
+                @if (_thinking)
+                {
+                    <div class="turn other"><div class="who">@Chat.AgentName</div><div class="bubble muted">…</div></div>
+                }
+            </div>
+
+            <div class="composer">
+                <textarea @bind="_input" @bind:event="oninput" @onkeydown="OnKey"
+                          placeholder="Chat with the agent, or Load a corpus above and Step / Auto-play it."
+                          disabled="@(_thinking || _playing)"></textarea>
+                <button @onclick="Send" disabled="@(_thinking || _playing || string.IsNullOrWhiteSpace(_input))">Send</button>
+            </div>
+        </section>
+
+        <section class="mem">
+            <h2>
+                Distilled memory <small>(what Mneme kept — reject any you don't want)</small>
+            </h2>
+            @if (_memory.Count == 0)
+            {
+                <p class="empty">No memory yet. Chat or replay a corpus — Mneme distills the conversation into epistemic events.</p>
+            }
+            else
+            {
+                <ul class="items">
+                    @foreach (var m in _memory)
+                    {
+                        <li>
+                            <span class="cat cat-@m.Category.ToString().ToLowerInvariant()">@m.Category</span>
+                            <span class="sum">@m.Summary</span>
+                            <button class="reject" title="Reject this memory (revoke)"
+                                    @onclick="() => Reject(m.EventId)">✕</button>
+                        </li>
+                    }
+                </ul>
+            }
+        </section>
+    </div>
+</div>
+
+@if (_bundle is not null)
+{
+    <div class="overlay" @onclick="CloseSleep">
+        <div class="sheet" @onclick:stopPropagation="true">
+            <div class="sheet-hdr">
+                <h2>😴 Condensed memory <small>· @_bundle.Index.Distiller</small></h2>
+                <button class="close" @onclick="CloseSleep">✕</button>
+            </div>
+            <p class="orient">@_bundle.Orientation.Paragraph</p>
+            @if (_bundle.Sections.Count == 0)
+            {
+                <p class="empty">No sections — capture a few more memories, then Sleep again.</p>
+            }
+            else
+            {
+                @foreach (var s in _bundle.Sections)
+                {
+                    <div class="sect">
+                        <div class="sect-hdr">
+                            <span class="cat cat-@s.Category.ToString().ToLowerInvariant()">@s.Category</span>
+                            <strong>@s.Title</strong>
+                            <span class="tok">~@s.TokenCount tok</span>
+                        </div>
+                        <div class="sect-body">@s.Content</div>
+                    </div>
+                }
+            }
+            <div class="sheet-ftr">
+                Condensed from <strong>@Chat.TotalDistilled</strong> captured memories ·
+                generated @_bundle.GeneratedAt.LocalDateTime.ToString("HH:mm:ss")
+                @if (_bundle.IsStale)
+                {
+                    <span class="stale">· stale</span>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private string _input = string.Empty;
+    private bool _thinking;
+    private IReadOnlyList<QueryResultItem> _memory = Array.Empty<QueryResultItem>();
+
+    private IReadOnlyList<CorpusConversation> _corpus = Array.Empty<CorpusConversation>();
+    private string _selectedId = string.Empty;
+    private CorpusConversation? _loaded;
+    private int _cursor;
+    private int _intervalMs = 2500;
+    private bool _playing;
+    private bool _busy;
+    private CancellationTokenSource? _playCts;
+
+    private ContextBundle? _bundle;
+    private bool _sleeping;
+
+    private bool HasNext => _loaded is not null && _cursor < _loaded.Turns.Count;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Chat.EnsureStartedAsync();
+        _corpus = CorpusLoader.Load();
+        if (_corpus.Count > 0) _selectedId = _corpus[0].Id;
+        await RefreshMemory();
+    }
+
+    private async Task Send()
+    {
+        var text = _input.Trim();
+        if (text.Length == 0 || _thinking) return;
+        _input = string.Empty;
+        _thinking = true;
+        StateHasChanged();
+        try
+        {
+            await Chat.SendAsync(text);
+            await RefreshMemory();
+        }
+        finally { _thinking = false; }
+    }
+
+    private async Task OnKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey) await Send();
+    }
+
+    private void LoadCorpus()
+    {
+        _loaded = _corpus.FirstOrDefault(c => c.Id == _selectedId);
+        _cursor = 0;
+    }
+
+    private async Task Step()
+    {
+        if (!HasNext || _busy) return;
+        _busy = true;
+        StateHasChanged();
+        try
+        {
+            var turn = _loaded!.Turns[_cursor++];
+            await Chat.FeedEntryAsync(turn.Speaker, turn.Text, turn.At);
+            await RefreshMemory();
+        }
+        finally { _busy = false; }
+    }
+
+    private void Play()
+    {
+        if (!HasNext || _playing) return;
+        _playing = true;
+        _playCts = new CancellationTokenSource();
+        _ = PlayLoop(_playCts.Token);
+    }
+
+    private void Pause()
+    {
+        _playing = false;
+        _playCts?.Cancel();
+    }
+
+    // Sequential auto-play: run one full step (LLM distill can take several
+    // seconds), then wait the interval, then the next — never overlapping.
+    private async Task PlayLoop(CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested && HasNext)
+            {
+                await InvokeAsync(Step);
+                await InvokeAsync(StateHasChanged);
+                await Task.Delay(_intervalMs, ct);
+            }
+        }
+        catch (OperationCanceledException) { /* paused */ }
+        finally
+        {
+            _playing = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task Reject(EventId id)
+    {
+        await Chat.RejectMemoryAsync(id);
+        await RefreshMemory();
+    }
+
+    private async Task Sleep()
+    {
+        _sleeping = true;
+        StateHasChanged();
+        try { _bundle = await Chat.SleepAsync(); }
+        finally { _sleeping = false; }
+    }
+
+    private void CloseSleep() => _bundle = null;
+
+    private async Task RefreshMemory() => _memory = await Chat.GetMemoryAsync();
+
+    public void Dispose() => _playCts?.Cancel();
+}

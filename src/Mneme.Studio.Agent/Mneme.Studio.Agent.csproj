@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Mneme.Studio.Agent</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Photino.NET" Version="2.0.13" />
+    <PackageReference Include="LibAcp" Version="0.1.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Mneme\Mneme.csproj" />
+    <ProjectReference Include="..\Mneme.Contracts\Mneme.Contracts.csproj" />
+  </ItemGroup>
+
+  <!-- The Web SDK already includes the JSON as Content; update it to copy to
+       <output>/corpus/locomo-sample.json. Set MNEME_LOCOMO_PATH to replay a
+       full LoCoMo dataset instead. -->
+  <ItemGroup>
+    <Content Update="Corpus\locomo-sample.json" Link="corpus\locomo-sample.json"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

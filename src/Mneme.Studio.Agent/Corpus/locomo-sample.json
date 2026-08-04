@@ -1,0 +1,83 @@
+[
+  {
+    "sample_id": "mini-001",
+    "conversation": {
+      "speaker_a": "Alice",
+      "speaker_b": "Bob",
+      "session_1_date_time": "1:56 pm on 8 May, 2023",
+      "session_1": [
+        { "speaker": "Alice", "dia_id": "D1:1", "text": "I just adopted a golden retriever puppy named Max." },
+        { "speaker": "Bob", "dia_id": "D1:2", "text": "That's wonderful! How old is Max?" },
+        { "speaker": "Alice", "dia_id": "D1:3", "text": "He's about 10 weeks old. We got him from a shelter in Portland." }
+      ],
+      "session_2_date_time": "9:10 am on 3 June, 2023",
+      "session_2": [
+        { "speaker": "Bob", "dia_id": "D2:1", "text": "How is the puppy training going?" },
+        { "speaker": "Alice", "dia_id": "D2:2", "text": "Max can already sit and stay. We start agility classes next month." },
+        { "speaker": "Alice", "dia_id": "D2:3", "text": "Also I accepted a new job as a data scientist at a fintech startup." }
+      ]
+    },
+    "qa": [
+      { "question": "What kind of dog does Alice have?", "answer": "a golden retriever", "category": 4 },
+      { "question": "Where did Alice get her puppy?", "answer": "from a shelter in Portland", "category": 4 },
+      { "question": "What is Alice's new job?", "answer": "data scientist at a fintech startup", "category": 4 }
+    ]
+  },
+  {
+    "sample_id": "mini-002",
+    "conversation": {
+      "speaker_a": "Carol",
+      "speaker_b": "Dave",
+      "session_1_date_time": "6:30 pm on 12 February, 2023",
+      "session_1": [
+        { "speaker": "Carol", "dia_id": "D1:1", "text": "I'm training for the Boston Marathon in April." },
+        { "speaker": "Dave", "dia_id": "D1:2", "text": "Impressive! What's your weekly mileage?" },
+        { "speaker": "Carol", "dia_id": "D1:3", "text": "About 40 miles now, building to 55. My goal is to finish under 3:30." }
+      ],
+      "session_2_date_time": "8:00 am on 20 April, 2023",
+      "session_2": [
+        { "speaker": "Dave", "dia_id": "D2:1", "text": "How did the marathon go?" },
+        { "speaker": "Carol", "dia_id": "D2:2", "text": "I finished in 3:24! Beat my goal. Already thinking about Chicago in the fall." }
+      ]
+    },
+    "qa": [
+      { "question": "Which marathon did Carol run in April?", "answer": "the Boston Marathon", "category": 4 },
+      { "question": "What was Carol's finish time?", "answer": "3:24", "category": 4 }
+    ]
+  },
+  {
+    "sample_id": "demo-project",
+    "conversation": {
+      "speaker_a": "Priya",
+      "speaker_b": "Sam",
+      "session_1_date_time": "10:00 am on 6 March, 2024",
+      "session_1": [
+        { "speaker": "Priya", "dia_id": "D1:1", "text": "We're kicking off the Helios payments migration this quarter. I'm the tech lead." },
+        { "speaker": "Sam", "dia_id": "D1:2", "text": "Great. What's the main goal for the first milestone?" },
+        { "speaker": "Priya", "dia_id": "D1:3", "text": "Our goal is to move the checkout service off the legacy monolith by end of Q2." },
+        { "speaker": "Sam", "dia_id": "D1:4", "text": "Which datastore are we going with for the new service?" },
+        { "speaker": "Priya", "dia_id": "D1:5", "text": "We decided to use PostgreSQL over DynamoDB, because the team knows SQL and we need transactions." },
+        { "speaker": "Sam", "dia_id": "D1:6", "text": "Makes sense. I'll start on the schema this week." }
+      ],
+      "session_2_date_time": "2:30 pm on 27 March, 2024",
+      "session_2": [
+        { "speaker": "Sam", "dia_id": "D2:1", "text": "The schema is done and I opened PR #142 for the checkout service skeleton." },
+        { "speaker": "Priya", "dia_id": "D2:2", "text": "Nice. One risk: the legacy monolith double-charges on ret/ry. We should hypothesize that the idempotency key is being dropped at the gateway." },
+        { "speaker": "Sam", "dia_id": "D2:3", "text": "I'll add an idempotency-key test. Also, we hired Lena as a second backend engineer starting next week." },
+        { "speaker": "Priya", "dia_id": "D2:4", "text": "Good. Let's shift the deadline for the checkout cutover from May 15 to June 1 to absorb the onboarding." }
+      ],
+      "session_3_date_time": "11:15 am on 24 April, 2024",
+      "session_3": [
+        { "speaker": "Lena", "dia_id": "D3:1", "text": "I confirmed the double-charge: the gateway was regenerating the idempotency key on retry. Fixed in PR #158." },
+        { "speaker": "Priya", "dia_id": "D3:2", "text": "Excellent — that confirms our hypothesis. Outcome: retries are now safe in staging." },
+        { "speaker": "Sam", "dia_id": "D3:3", "text": "Checkout service passed load testing at 2x peak traffic. We're on track for the June 1 cutover." },
+        { "speaker": "Priya", "dia_id": "D3:4", "text": "Let's also decide to keep the legacy monolith in read-only mode for 30 days after cutover as a rollback safety net." }
+      ]
+    },
+    "qa": [
+      { "question": "Which datastore did the team choose and why?", "answer": "PostgreSQL, because the team knows SQL and needs transactions", "category": 4 },
+      { "question": "Why was the checkout cutover deadline moved to June 1?", "answer": "to absorb Lena's onboarding", "category": 1 },
+      { "question": "What caused the double-charge bug?", "answer": "the gateway regenerated the idempotency key on retry", "category": 1 }
+    ]
+  }
+]
