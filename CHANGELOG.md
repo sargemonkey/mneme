@@ -21,6 +21,19 @@ release notes.
   (benchmarks, unit tests) was always correct, which is why this went unnoticed.
 
 ### Added
+- **Offline consolidation / "dreaming" worker (Phase 14, ADR-0004):** a third
+  host LLM seam `IDreamer` (events → derived events, symmetric to
+  `ISessionDistiller` and `IDistiller`) plus a `DreamCoordinator` that loads a
+  workstream's events, prior skills, and open contradiction candidates, runs the
+  dreamer, and **direct-ingests** each output as a `Citation.Derived` event.
+  Guardrails enforced by the coordinator: outputs are re-run through the ingest
+  redactor, and each output's requested `Visibility` is **capped by the
+  sensitivity of its source events** (any Confidential/Secret/Pii source forces
+  the derived event to `Private`; only all-Public/Internal sources may reach
+  `Global`). Every run is audited in a new `dream_runs` table. The coordinator is
+  invoked by the host (Mneme owns the consolidation logic, not the scheduler);
+  it's inert until an `IDreamer` is wired. Schema v15→v16. Tested
+  (`DreamCoordinatorTests`).
 - **Cross-agent contradiction detection (Phase 13, ADR-0004):** two currently-
   valid structured triples with the same `subject_key` + `predicate` but a
   different `object` are recorded as open candidates in a new

@@ -161,6 +161,15 @@ public static class MnemeServiceCollectionExtensions
                 sp.GetService<ISessionDistiller>(),
                 sp.GetRequiredService<TimeProvider>()));
 
+        // Offline consolidation ("dreaming") coordinator. Always registered;
+        // inert until a host IDreamer is wired (IsEnabled == false).
+        services.TryAddSingleton<Mneme.Dreaming.DreamCoordinator>(sp =>
+            new Mneme.Dreaming.DreamCoordinator(
+                sp.GetRequiredService<SqliteConnectionFactory>(),
+                sp.GetRequiredService<IMemoryAgent>(),
+                sp.GetService<IDreamer>(),
+                sp.GetRequiredService<TimeProvider>()));
+
         var permitted = opts.PermittedCategories?.ToArray()
             ?? Array.Empty<EpistemicCategory>(); // empty == all (per CapabilityToken.Allows)
         var now = DateTimeOffset.UtcNow;

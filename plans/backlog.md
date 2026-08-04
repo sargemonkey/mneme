@@ -862,11 +862,15 @@ while keeping every derived memory auditable and boundary-safe.
   (`projection_skills` + `SkillPayload`), **not** an 8th `EpistemicCategory`
   (skills ride under `Evidence`; `SkillsProjector` matches by payload type).
   Schema v14. Tested (`SkillProjectionTests`). *(shipped)*
-- [ ] **phase14-idreamer-dreamjob** — Host-supplied `IDreamer` (versioned
+- [x] **phase14-idreamer-dreamjob** — Host-supplied `IDreamer` (versioned
   `Id`, symmetric to `ISessionDistiller`/`IDistiller`) over an
-  event-range query across sessions/agents; scheduled `DreamJob` worker
-  (replay → abstract → reconcile → promote). Emits `Derived` events.
-  Depends on `phase13-visibility-tier` + `phase14-citation-derived`.
+  event-range query across sessions/agents; `DreamCoordinator` runs the
+  loop (load → dream → guardrail → direct-ingest as `Derived` → audit).
+  Authority model: direct-ingest, guardrail-gated (re-redact via
+  `IngestAsync`, visibility capped by source sensitivity). `dream_runs`
+  audit (schema v16). Scheduling is host-owned (Mneme owns the logic, not
+  the cron), consistent with session distillation. Tested
+  (`DreamCoordinatorTests`). *(shipped)*
 - [ ] **phase14-cross-session-reconcile** — Dedup / prune across
   concurrent sessions; **proposes** entity merges into the review queue
   (never auto-applies — conservative-entity-resolution locked decision).

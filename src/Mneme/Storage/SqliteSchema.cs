@@ -27,7 +27,7 @@ namespace Mneme.Storage;
 public static class SqliteSchema
 {
     /// <summary>Current schema version. Bumped when the DDL changes incompatibly.</summary>
-    public const int Version = 15;
+    public const int Version = 16;
 
     /// <summary>
     /// Idempotently create all Phase 1 tables, indexes, and the
@@ -574,6 +574,20 @@ public static class SqliteSchema
         ) WITHOUT ROWID;
         CREATE INDEX IF NOT EXISTS idx_memory_contradictions_status
             ON memory_contradictions(workstream_id, status);
+
+        -- v16: audit log for the offline consolidation ("dreaming") worker
+        -- (ADR-0004). The consolidator is the highest-privilege actor, so every
+        -- run is recorded: what it read, what it produced, and which dreamer.
+        CREATE TABLE IF NOT EXISTS dream_runs (
+            run_id        TEXT NOT NULL PRIMARY KEY,
+            workstream_id TEXT NOT NULL,
+            dreamer_id    TEXT NOT NULL,
+            started_at    TEXT NOT NULL,
+            events_in     INTEGER NOT NULL,
+            outputs_out   INTEGER NOT NULL
+        ) WITHOUT ROWID;
+        CREATE INDEX IF NOT EXISTS idx_dream_runs_workstream
+            ON dream_runs(workstream_id, started_at);
 
         CREATE TABLE IF NOT EXISTS workstream_config (
             workstream_id TEXT NOT NULL PRIMARY KEY,
