@@ -21,6 +21,14 @@ release notes.
   (benchmarks, unit tests) was always correct, which is why this went unnoticed.
 
 ### Added
+- **Cross-session fact de-duplication (Phase 14, ADR-0004):** a
+  `DuplicateFactsProjector` that records two non-revoked facts sharing a
+  normalized statement (`LOWER(TRIM(...))`) in a new `memory_duplicates` review
+  table — the signature of concurrent sessions/agents asserting the same thing.
+  Propose-only (never auto-revokes or merges, honouring the conservative-
+  resolution locked decision); the earlier fact is canonical. Entity-level merges
+  continue to flow through the existing `entity_merge_proposals` pipeline. Schema
+  v17→v18. Tested (`DuplicateFactsTests`).
 - **Dreamer privacy guardrails (Phase 14, ADR-0004):** the operational
   guardrails around the consolidation worker. A per-workstream opt-in flag
   `participates_in_cross_workstream_consolidation` (default **false**, on

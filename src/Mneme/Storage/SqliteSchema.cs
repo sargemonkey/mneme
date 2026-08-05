@@ -27,7 +27,7 @@ namespace Mneme.Storage;
 public static class SqliteSchema
 {
     /// <summary>Current schema version. Bumped when the DDL changes incompatibly.</summary>
-    public const int Version = 17;
+    public const int Version = 18;
 
     /// <summary>
     /// Idempotently create all Phase 1 tables, indexes, and the
@@ -580,6 +580,26 @@ public static class SqliteSchema
         ) WITHOUT ROWID;
         CREATE INDEX IF NOT EXISTS idx_memory_contradictions_status
             ON memory_contradictions(workstream_id, status);
+
+        -- v18: cross-session fact dedup candidates (ADR-0004 / Phase 14).
+        -- When two non-revoked facts in a workstream share the same normalized
+        -- statement (concurrent agents/sessions asserting the same thing), the
+        -- DuplicateFactsProjector records the pair here as an open review
+        -- candidate. Propose-only — it never revokes; a curator confirms/dismisses.
+        -- canonical_event_id is the earlier fact (kept); duplicate_event_id the later.
+        CREATE TABLE IF NOT EXISTS memory_duplicates (
+            workstream_id      TEXT NOT NULL,
+            canonical_event_id TEXT NOT NULL,
+            duplicate_event_id TEXT NOT NULL,
+            statement_key      TEXT NOT NULL,
+            detected_at        TEXT NOT NULL,
+            status             INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (workstream_id, canonical_event_id, duplicate_event_id),
+            FOREIGN KEY (canonical_event_id) REFERENCES memory_events(event_id),
+            FOREIGN KEY (duplicate_event_id) REFERENCES memory_events(event_id)
+        ) WITHOUT ROWID;
+        CREATE INDEX IF NOT EXISTS idx_memory_duplicates_status
+            ON memory_duplicates(workstream_id, status);
 
         -- v16: audit log for the offline consolidation ("dreaming") worker
         -- (ADR-0004). The consolidator is the highest-privilege actor, so every

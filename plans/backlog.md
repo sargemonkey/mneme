@@ -871,10 +871,13 @@ while keeping every derived memory auditable and boundary-safe.
   audit (schema v16). Scheduling is host-owned (Mneme owns the logic, not
   the cron), consistent with session distillation. Tested
   (`DreamCoordinatorTests`). *(shipped)*
-- [ ] **phase14-cross-session-reconcile** — Dedup / prune across
-  concurrent sessions; **proposes** entity merges into the review queue
-  (never auto-applies — conservative-entity-resolution locked decision).
-  Depends on `phase14-idreamer-dreamjob`.
+- [x] **phase14-cross-session-reconcile** — Fact-level dedup:
+  `DuplicateFactsProjector` records two non-revoked facts sharing a
+  normalized statement into `memory_duplicates` as open review
+  candidates (propose-only; earlier fact canonical). Deterministic
+  `LOWER(TRIM(...))` match. Entity merges continue via the existing
+  `entity_merge_proposals` pipeline. Schema v18. Tested
+  (`DuplicateFactsTests`). *(shipped)*
 - [x] **phase14-dreamer-guardrails** — Operational guardrails. Opt-in
   `participates_in_cross_workstream_consolidation` flag (default false,
   `WorkstreamConfigStore`); `DreamGuardrails` classification floor

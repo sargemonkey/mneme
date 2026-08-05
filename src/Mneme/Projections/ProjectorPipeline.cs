@@ -39,6 +39,7 @@ public sealed class ProjectorPipeline
         new FactsProjector(),
         new FactTriplesProjector(),
         new ContradictionsProjector(),
+        new DuplicateFactsProjector(),
         new DecisionsProjector(),
         new GoalsProjector(),
         new HypothesesProjector(),

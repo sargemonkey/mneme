@@ -89,6 +89,7 @@ public static class MnemeServiceCollectionExtensions
                 new Mneme.Projections.Projectors.FactsProjector(),
                 new Mneme.Projections.Projectors.FactTriplesProjector(),
                 new Mneme.Projections.Projectors.ContradictionsProjector(),
+                new Mneme.Projections.Projectors.DuplicateFactsProjector(),
                 new Mneme.Projections.Projectors.DecisionsProjector(),
                 new Mneme.Projections.Projectors.GoalsProjector(),
                 new Mneme.Projections.Projectors.HypothesesProjector(),
