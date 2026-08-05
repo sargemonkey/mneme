@@ -179,6 +179,17 @@ public static class MnemeServiceCollectionExtensions
                 sp.GetRequiredService<SqliteConnectionFactory>(),
                 sp.GetRequiredService<TimeProvider>()));
 
+        // Cross-workstream ("fleet") consolidation. Mines opted-in workstreams'
+        // skills into a global skill library, guardrailed by the opt-in flag +
+        // classification floor. Inert until a host IDreamer is wired.
+        services.TryAddSingleton<Mneme.Dreaming.FleetConsolidator>(sp =>
+            new Mneme.Dreaming.FleetConsolidator(
+                sp.GetRequiredService<SqliteConnectionFactory>(),
+                sp.GetRequiredService<IMemoryAgent>(),
+                sp.GetService<IDreamer>(),
+                sp.GetRequiredService<WorkstreamConfigStore>(),
+                sp.GetRequiredService<TimeProvider>()));
+
         var permitted = opts.PermittedCategories?.ToArray()
             ?? Array.Empty<EpistemicCategory>(); // empty == all (per CapabilityToken.Allows)
         var now = DateTimeOffset.UtcNow;

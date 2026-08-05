@@ -113,4 +113,23 @@ public sealed class WorkstreamConfigStore
             _clock.GetUtcNow().UtcDateTime.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
         cmd.ExecuteNonQuery();
     }
+
+    /// <summary>
+    /// List every workstream that has opted in to cross-workstream consolidation
+    /// (ADR-0004). Used by the fleet consolidator to decide what it may mine.
+    /// </summary>
+    public IReadOnlyList<WorkstreamId> ListParticipatingWorkstreams()
+    {
+        var list = new List<WorkstreamId>();
+        using var connection = _connections.Open();
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT workstream_id FROM workstream_config
+            WHERE participates_in_cross_workstream_consolidation = 1
+            ORDER BY workstream_id;
+            """;
+        using var r = cmd.ExecuteReader();
+        while (r.Read()) list.Add(new WorkstreamId(r.GetString(0)));
+        return list;
+    }
 }

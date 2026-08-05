@@ -177,7 +177,10 @@ index + hybrid fusion; a `sqlite-vec`-backed index for million-vector corpora
 is deferred until that extension reaches 1.0.
 
 Phases 13 (multi-agent shared workstreams) and 14 (offline "dreaming"
-consolidation) are designed but not yet built — see
+consolidation) are now implemented at the substrate level — agent/role scope,
+visibility tiers, cross-agent contradiction detection, procedural skills,
+cross-session dedup, the `IDreamer` consolidation worker with privacy guardrails,
+and cross-workstream global-skill promotion. See
 [ADR-0004](docs/adr/0004-multi-agent-and-dreaming.md), which also records the
 privacy/compliance constraints for the single-user → multi-user shift.
 

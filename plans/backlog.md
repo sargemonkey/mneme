@@ -887,11 +887,14 @@ while keeping every derived memory auditable and boundary-safe.
   `dream_runs`. The per-output safety guardrails (re-redact via
   `IngestAsync`, visibility cap) shipped with the worker. Schema v17.
   Tested (`DreamGuardrailsTests`). *(shipped)*
-- [ ] **phase14-fleet-global-skills** — Run the dreamer with a
-  cross-workstream capability to mine patterns *across* workstreams into
-  a `global`-visibility skill library. Depends on
-  `phase14-dreamer-guardrails` (the boundary-crossing job carries the
-  strongest guardrails).
+- [x] **phase14-fleet-global-skills** — `FleetConsolidator` mines
+  opted-in workstreams' skills (`WorkstreamConfigStore.ListParticipating`)
+  and promotes recurring patterns into a global (`Visibility.Global`)
+  skill library (default workstream `mneme-global-skills`). Guardrails:
+  opt-in only, cross-workstream token required, hard classification floor
+  (global only from all-Public/Internal sources; sensitive skipped),
+  re-redaction, `dream_runs` audit. Completes Phase 14. Tested
+  (`FleetConsolidatorTests`). *(shipped)*
 
 ---
 

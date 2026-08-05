@@ -21,6 +21,17 @@ release notes.
   (benchmarks, unit tests) was always correct, which is why this went unnoticed.
 
 ### Added
+- **Cross-workstream "fleet" consolidation (Phase 14, ADR-0004):** a
+  `FleetConsolidator` that mines the skills of every **opted-in** workstream for
+  recurring patterns and promotes eligible results into a shared
+  `Visibility.Global` skill library (default workstream `mneme-global-skills`).
+  The one job that crosses the isolation boundary, so it carries every guardrail:
+  opt-in only (`WorkstreamConfigStore.ListParticipatingWorkstreams`), a required
+  cross-workstream token, a hard **classification floor** (a global skill is
+  promoted only when every source event is Public/Internal — sensitive sources
+  are skipped, never written as a sensitive global skill), plus re-redaction and
+  `dream_runs` audit. Completes the Phase 14 dreaming roadmap. Tested
+  (`FleetConsolidatorTests`).
 - **Cross-session fact de-duplication (Phase 14, ADR-0004):** a
   `DuplicateFactsProjector` that records two non-revoked facts sharing a
   normalized statement (`LOWER(TRIM(...))`) in a new `memory_duplicates` review
