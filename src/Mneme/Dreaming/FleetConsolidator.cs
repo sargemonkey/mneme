@@ -89,6 +89,7 @@ public sealed class FleetConsolidator
         }
 
         var globalWs = globalWorkstream ?? new WorkstreamId(DefaultGlobalWorkstream);
+        var startedAt = _clock.GetUtcNow();
         var participating = _config.ListParticipatingWorkstreams()
             .Where(w => w.Value != globalWs.Value)
             .ToList();
@@ -151,7 +152,7 @@ public sealed class FleetConsolidator
         }
 
         var runId = "fleet-run-" + Guid.NewGuid().ToString("N");
-        RecordRun(runId, globalWs, _dreamer.Id, _clock.GetUtcNow(), events.Count, produced.Count);
+        RecordRun(runId, globalWs, _dreamer.Id, startedAt, events.Count, produced.Count);
 
         return new FleetConsolidationSummary(
             runId, _dreamer.Id, participating.Count, events.Count, produced, skipped);
@@ -162,15 +163,20 @@ public sealed class FleetConsolidator
         var list = new List<DistillationEvent>();
         using var c = _connections.Open();
         using var cmd = c.CreateCommand();
-        // Skill events (SkillPayload) that are non-revoked. Their events carry
-        // the source classification we gate promotion on.
+        // Skill events (SkillPayload) that are non-revoked AND shareable. A skill
+        // whose visibility was capped Private (because it derived from
+        // Confidential/Secret/Pii sources, or its own text is sensitive) must NOT
+        // be mined across the isolation boundary into the global library — that
+        // would launder source-sensitivity through a Public re-classification.
         cmd.CommandText = """
             SELECT e.event_id, e.category, e.classification, e.valid_at, e.created_at,
                    e.payload_json, e.provenance_json
             FROM projection_skills s
             JOIN memory_events e ON e.event_id = s.event_id
             LEFT JOIN memory_revocations r ON r.event_id = e.event_id
+            LEFT JOIN memory_visibility v ON v.event_id = e.event_id
             WHERE s.workstream_id = $ws AND s.revoked_at IS NULL AND r.event_id IS NULL
+              AND COALESCE(v.visibility, 1) >= 1
             ORDER BY s.valid_at DESC
             LIMIT $n;
             """;
@@ -237,10 +243,17 @@ public sealed class FleetConsolidator
     {
         using var c = _connections.Open();
         using var cmd = c.CreateCommand();
+        // Never RAISE above the output's own ingest-time visibility: a global
+        // promotion must not push an output whose own text is Pii/Confidential/
+        // Secret (stamped Private at ingest) up to Global. Benign outputs
+        // (Shared default) still promote to Global.
         cmd.CommandText = """
             INSERT INTO memory_visibility(event_id, workstream_id, visibility, set_at)
             VALUES ($eid, $ws, $vis, $at)
-            ON CONFLICT(event_id) DO UPDATE SET visibility = excluded.visibility, set_at = excluded.set_at;
+            ON CONFLICT(event_id) DO UPDATE SET
+                visibility = CASE WHEN memory_visibility.visibility = 0
+                                  THEN 0 ELSE excluded.visibility END,
+                set_at = excluded.set_at;
             """;
         cmd.Parameters.AddWithValue("$eid", eventId.Value);
         cmd.Parameters.AddWithValue("$ws", ws.Value);

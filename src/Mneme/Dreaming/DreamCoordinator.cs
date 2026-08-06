@@ -74,13 +74,13 @@ public sealed class DreamCoordinator
                 "services.AddSingleton<IDreamer>(sp => new YourDreamer(...));");
         }
 
-        var events = LoadEvents(workstream, maxEvents);
+        var events = LoadEvents(workstream, maxEvents, capability.Principal.Value);
         var request = new DreamRequest(
             Workstream: workstream,
             GeneratedAt: _clock.GetUtcNow(),
             Events: events,
-            PriorSkills: LoadPriorSkills(workstream, 100),
-            OpenContradictions: LoadOpenContradictions(workstream, 100),
+            PriorSkills: LoadPriorSkills(workstream, 100, capability.Principal.Value),
+            OpenContradictions: LoadOpenContradictions(workstream, 100, capability.Principal.Value),
             TokenBudget: 8192);
 
         var result = await _dreamer.DreamAsync(request, ct).ConfigureAwait(false);
@@ -156,21 +156,27 @@ public sealed class DreamCoordinator
         return list;
     }
 
-    private IReadOnlyList<DistillationEvent> LoadEvents(WorkstreamId ws, int limit)
+    private IReadOnlyList<DistillationEvent> LoadEvents(WorkstreamId ws, int limit, string viewer)
     {
         var list = new List<DistillationEvent>();
         using var c = _connections.Open();
         using var cmd = c.CreateCommand();
+        // Feed the dreamer only events the consolidating principal is allowed to
+        // see: another author's Private events must not be pulled in and then
+        // re-emitted under this principal's derived output.
         cmd.CommandText = """
             SELECT e.event_id, e.category, e.classification, e.valid_at, e.created_at,
                    e.payload_json, e.provenance_json
             FROM memory_events e
             LEFT JOIN memory_revocations r ON r.event_id = e.event_id
+            LEFT JOIN memory_visibility v ON v.event_id = e.event_id
             WHERE e.workstream_id = $ws AND r.event_id IS NULL AND e.event_channel = 0
+              AND (COALESCE(v.visibility, 1) >= 1 OR e.principal_id = $viewer)
             ORDER BY e.created_at DESC
             LIMIT $n;
             """;
         cmd.Parameters.AddWithValue("$ws", ws.Value);
+        cmd.Parameters.AddWithValue("$viewer", viewer);
         cmd.Parameters.AddWithValue("$n", limit);
         using var rd = cmd.ExecuteReader();
         while (rd.Read())
@@ -188,7 +194,7 @@ public sealed class DreamCoordinator
         return list;
     }
 
-    private IReadOnlyList<PriorSkill> LoadPriorSkills(WorkstreamId ws, int limit)
+    private IReadOnlyList<PriorSkill> LoadPriorSkills(WorkstreamId ws, int limit, string viewer)
     {
         var list = new List<PriorSkill>();
         using var c = _connections.Open();
@@ -196,12 +202,16 @@ public sealed class DreamCoordinator
         cmd.CommandText = """
             SELECT s.event_id, s.name, s.procedure, s.trigger
             FROM projection_skills s
+            JOIN memory_events e ON e.event_id = s.event_id
             LEFT JOIN memory_revocations r ON r.event_id = s.event_id
+            LEFT JOIN memory_visibility v ON v.event_id = s.event_id
             WHERE s.workstream_id = $ws AND s.revoked_at IS NULL AND r.event_id IS NULL
+              AND (COALESCE(v.visibility, 1) >= 1 OR e.principal_id = $viewer)
             ORDER BY s.valid_at DESC
             LIMIT $n;
             """;
         cmd.Parameters.AddWithValue("$ws", ws.Value);
+        cmd.Parameters.AddWithValue("$viewer", viewer);
         cmd.Parameters.AddWithValue("$n", limit);
         using var rd = cmd.ExecuteReader();
         while (rd.Read())
@@ -213,19 +223,29 @@ public sealed class DreamCoordinator
         return list;
     }
 
-    private IReadOnlyList<ContradictionCandidate> LoadOpenContradictions(WorkstreamId ws, int limit)
+    private IReadOnlyList<ContradictionCandidate> LoadOpenContradictions(WorkstreamId ws, int limit, string viewer)
     {
         var list = new List<ContradictionCandidate>();
         using var c = _connections.Open();
         using var cmd = c.CreateCommand();
+        // A contradiction pairs two events; surface it only if the consolidating
+        // principal is authorized to see BOTH sides (neither is another author's
+        // Private event).
         cmd.CommandText = """
-            SELECT subject_key, predicate, event_id_a, object_a, event_id_b, object_b
-            FROM memory_contradictions
-            WHERE workstream_id = $ws AND status = 0
-            ORDER BY detected_at DESC
+            SELECT ct.subject_key, ct.predicate, ct.event_id_a, ct.object_a, ct.event_id_b, ct.object_b
+            FROM memory_contradictions ct
+            JOIN memory_events ea ON ea.event_id = ct.event_id_a
+            LEFT JOIN memory_visibility va ON va.event_id = ct.event_id_a
+            JOIN memory_events eb ON eb.event_id = ct.event_id_b
+            LEFT JOIN memory_visibility vb ON vb.event_id = ct.event_id_b
+            WHERE ct.workstream_id = $ws AND ct.status = 0
+              AND (COALESCE(va.visibility, 1) >= 1 OR ea.principal_id = $viewer)
+              AND (COALESCE(vb.visibility, 1) >= 1 OR eb.principal_id = $viewer)
+            ORDER BY ct.detected_at DESC
             LIMIT $n;
             """;
         cmd.Parameters.AddWithValue("$ws", ws.Value);
+        cmd.Parameters.AddWithValue("$viewer", viewer);
         cmd.Parameters.AddWithValue("$n", limit);
         using var rd = cmd.ExecuteReader();
         while (rd.Read())
@@ -259,10 +279,17 @@ public sealed class DreamCoordinator
     {
         using var c = _connections.Open();
         using var cmd = c.CreateCommand();
+        // Never RAISE visibility above what the output's own re-classification
+        // earned at ingest: if IngestAsync already stamped this event Private
+        // (its own text is Pii/Confidential/Secret), keep it Private even when
+        // the source-based cap would allow Shared/Global. Only ever lower.
         cmd.CommandText = """
             INSERT INTO memory_visibility(event_id, workstream_id, visibility, set_at)
             VALUES ($eid, $ws, $vis, $at)
-            ON CONFLICT(event_id) DO UPDATE SET visibility = excluded.visibility, set_at = excluded.set_at;
+            ON CONFLICT(event_id) DO UPDATE SET
+                visibility = CASE WHEN memory_visibility.visibility = 0
+                                  THEN 0 ELSE excluded.visibility END,
+                set_at = excluded.set_at;
             """;
         cmd.Parameters.AddWithValue("$eid", eventId.Value);
         cmd.Parameters.AddWithValue("$ws", ws.Value);

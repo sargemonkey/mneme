@@ -161,6 +161,55 @@ public sealed class SubjectScopedQueryTests : IDisposable
         Assert.True(result.SubjectTriples is null || result.SubjectTriples.Count == 0);
     }
 
+    [Fact]
+    public async Task Subject_triple_supplement_enforces_author_only_private()
+    {
+        // Regression for the F1 pre-publish finding: the SupplementSubjectTriples
+        // content path must apply the SAME author-only Private gate as every other
+        // read path. Before the fix it returned another principal's Private
+        // (Confidential/PII) fact triples verbatim inside a shared workstream.
+        using var sp = Build("kgq-priv");
+        var agent = sp.GetRequiredService<IMemoryAgent>();
+        var vectors = sp.GetRequiredService<VectorIndex>();
+        var query = sp.GetRequiredService<IMemoryQueryAPI>();
+        var ws = new WorkstreamId("kgq-priv");
+
+        // "Confidential …" → Classification.Confidential → Visibility.Private,
+        // authored by alice.
+        await agent.IngestAsync(FactBy("zeus", "kgq-priv",
+            "Confidential: Zeus budget is $4.2M under NDA",
+            new FactTriple("Zeus", "budget", "$4.2M under NDA"), "alice"));
+        await vectors.BackfillAsync(ws);
+
+        // A different principal in the same shared workstream sets the flag: it
+        // must NOT receive alice's Private triple.
+        var asOther = await query.QueryAsync(new QueryRequest(
+            new QuerySpec(ws, FreeText: "Zeus"), SupplementSubjectTriples: true),
+            TokenFor("kgq-priv", "mallory"));
+        Assert.True(asOther.SubjectTriples is null || asOther.SubjectTriples.Count == 0,
+            "F1: a Private fact triple leaked to a non-author via SupplementSubjectTriples");
+
+        // The author still sees their own Private triple.
+        var asAuthor = await query.QueryAsync(new QueryRequest(
+            new QuerySpec(ws, FreeText: "Zeus"), SupplementSubjectTriples: true),
+            TokenFor("kgq-priv", "alice"));
+        Assert.NotNull(asAuthor.SubjectTriples);
+        Assert.Contains(asAuthor.SubjectTriples!, h => h.Triple.Subject == "Zeus");
+    }
+
+    private static CaptureEvent FactBy(string id, string ws, string statement, FactTriple triple, string principal) =>
+        new(new EventId(id), new WorkstreamId(ws), EventChannel.Epistemic,
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+            new FactPayload(statement, Array.Empty<EventId>(), new[] { triple }),
+            new CaptureProvenance(new CaptureSourceId("t"), new PrincipalId(principal)));
+
+    private static CapabilityToken TokenFor(string ws, string principal) => new(
+        Principal: new PrincipalId(principal),
+        Workstream: new WorkstreamId(ws),
+        NotBefore: DateTimeOffset.UtcNow.AddMinutes(-1),
+        NotAfter: DateTimeOffset.UtcNow.AddDays(1),
+        AllowedCategories: Array.Empty<EpistemicCategory>());
+
     private sealed class BagOfWordsEmbedder : IEmbeddingProvider
     {
         public string Id => "test/bag-of-words@64";

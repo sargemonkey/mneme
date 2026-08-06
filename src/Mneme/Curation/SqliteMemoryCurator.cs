@@ -159,6 +159,14 @@ public sealed class SqliteMemoryCurator : IMemoryCurator
             workstreamId = (wsLookup.ExecuteScalar() as string) ?? throw new InvalidOperationException("workstream lookup failed");
         }
 
+        // Capability workstream scope check — mirror AppendCuration. Without this,
+        // a revert token scoped to workstream A could revert curations in B.
+        if (cap.Workstream is { } cws && cws.Value != workstreamId)
+        {
+            throw new CapabilityDeniedError(
+                $"curation capability scoped to '{cws.Value}'; target curation is in '{workstreamId}'");
+        }
+
         InsertCurationEvent(connection, tx,
             eventId: newEventId,
             targetEventId: new EventId(curationEventId.Value),

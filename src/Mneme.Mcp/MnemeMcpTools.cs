@@ -46,13 +46,15 @@ public static class MnemeMcpTools
         Persist a single event (Evidence by default) into Mneme's append-only memory log
         for the configured workstream. Call BEFORE the conversation moves on whenever the
         user has shared a fact, made a decision, or noted an outcome that future turns
-        might benefit from. Idempotent on the supplied event_id — re-calling with the same
-        id is a no-op.
+        might benefit from. Idempotent ONLY on a caller-supplied event_id — re-calling with
+        the same id is a no-op. Leaving event_id blank auto-generates a fresh ULID each
+        call, so a blank-id retry is NOT idempotent (it appends a new event); supply a
+        stable id if you need retry-safety.
         """)]
     public static async Task<string> Remember(
         IMemoryAgent agent,
         CapabilityToken token,
-        [Description("Stable id for the event (idempotency key). Leave blank to auto-generate a ULID-like id.")] string? eventId,
+        [Description("Stable id for the event (idempotency key). Leave blank to auto-generate a ULID; note a blank id is not retry-idempotent.")] string? eventId,
         [Description("Free-text content to remember.")] string content,
         [Description("Optional source descriptor (URL, file path, plugin name).")] string? source = null,
         CancellationToken ct = default)
@@ -61,7 +63,7 @@ public static class MnemeMcpTools
         {
             throw new InvalidOperationException("Server is not configured for a single workstream; pass one explicitly.");
         }
-        var id = string.IsNullOrWhiteSpace(eventId) ? "mcp-" + Guid.NewGuid().ToString("N") : eventId!;
+        var id = string.IsNullOrWhiteSpace(eventId) ? Mneme.Util.Ulid.NewUlid() : eventId!;
         var now = DateTimeOffset.UtcNow;
         var result = await agent.IngestAsync(new CaptureEvent(
             new EventId(id),

@@ -986,6 +986,33 @@ turn-based conversation into epistemic memory.
   `CogneeSpanExporter`. Major developer ergonomics win for an
   embedded library. See `research-design-lessons.md` §3.8.
 
+## Pre-publish review follow-ups (2026-08)
+
+Deferred items from the parallel security/architecture/SDL/correctness
+review (the 6 confirmed security/correctness findings were fixed and
+shipped; see `CHANGELOG.md` "Security"). These are tracked for post-alpha:
+
+- [ ] **review-curation-on-main-log** — Move HITL curation from the
+  `curation_events` side table onto append-only `memory_events` payloads
+  with a rebuildable `curation_log` projection (locked decision #13).
+  Revert should append a new event, not `UPDATE reverted_by`.
+- [ ] **review-erasure-cascade** — Extend `RevokeAsync` (or a new
+  per-principal erase) to purge distilled content from `payload_json`,
+  `projection_*`, and FTS, and cascade to dreamed/derived copies
+  (GDPR Art. 17). Pairs with `cross-cutting-workstream-export` (Art. 20).
+- [ ] **review-bitemporal-close** — Close `invalid_at`/`expired_at` on
+  supersession and fix `AsOf` to use the knowledge-time axis
+  (`created_at`/`expired_at`).
+- [ ] **review-timestamp-unixms** — Migrate storage-boundary temporal
+  columns from ISO-8601 TEXT to INTEGER Unix-ms (locked convention).
+  No back-compat migration needed (we control versions).
+- [ ] **review-sync-completeness** — Version the sync envelope to carry
+  `principal_id` + visibility and re-run projections/FTS on import so
+  peers converge semantically, not just by row count.
+- [ ] **review-split-merge** — Implement `SplitFactAsync`/`MergeFactsAsync`
+  (currently throw). Tracked also under Phase 7.5.
+
+
 ---
 
 ## Out of scope for this repo

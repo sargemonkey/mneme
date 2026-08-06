@@ -46,10 +46,15 @@ public sealed class DerivedCitationResolver
         if (from.Count == 0) return Array.Empty<EventId>();
 
         var crossOk = token.CrossWorkstream && token.Workstream is null;
+        var viewer = token.Principal.Value;
         var allowed = new List<EventId>(from.Count);
-        foreach (var (sourceId, workstream, revoked) in ReadSourceWorkstreams(from))
+        foreach (var (sourceId, workstream, revoked, visibility, principal) in ReadSourceWorkstreams(from))
         {
             if (revoked) continue; // never surface a revoked source through a citation
+            // Author-only visibility also applies to citation traversal: a Private
+            // source authored by someone else must not leak its existence/id.
+            var visible = visibility >= 1 || string.Equals(principal, viewer, StringComparison.Ordinal);
+            if (!visible) continue;
             if (crossOk || (token.Workstream is { } w && w.Value == workstream))
             {
                 allowed.Add(new EventId(sourceId));
@@ -73,22 +78,25 @@ public sealed class DerivedCitationResolver
             : Array.Empty<string>();
     }
 
-    private IEnumerable<(string EventId, string Workstream, bool Revoked)> ReadSourceWorkstreams(IReadOnlyList<string> ids)
+    private IEnumerable<(string EventId, string Workstream, bool Revoked, int Visibility, string? Principal)> ReadSourceWorkstreams(IReadOnlyList<string> ids)
     {
         using var c = _connections.Open();
         using var cmd = c.CreateCommand();
         cmd.CommandText = """
-            SELECT e.event_id, e.workstream_id, (r.event_id IS NOT NULL) AS revoked
+            SELECT e.event_id, e.workstream_id, (r.event_id IS NOT NULL) AS revoked,
+                   COALESCE(v.visibility, 1) AS visibility, e.principal_id
             FROM memory_events e
             LEFT JOIN memory_revocations r ON r.event_id = e.event_id
+            LEFT JOIN memory_visibility v ON v.event_id = e.event_id
             WHERE e.event_id IN (SELECT value FROM json_each($ids));
             """;
         cmd.Parameters.AddWithValue("$ids", System.Text.Json.JsonSerializer.Serialize(ids));
         using var rd = cmd.ExecuteReader();
-        var rows = new List<(string, string, bool)>();
+        var rows = new List<(string, string, bool, int, string?)>();
         while (rd.Read())
         {
-            rows.Add((rd.GetString(0), rd.GetString(1), rd.GetInt64(2) != 0));
+            rows.Add((rd.GetString(0), rd.GetString(1), rd.GetInt64(2) != 0,
+                rd.GetInt32(3), rd.IsDBNull(4) ? null : rd.GetString(4)));
         }
         return rows;
     }

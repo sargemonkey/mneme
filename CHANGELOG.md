@@ -10,6 +10,45 @@ release notes.
 ## [Unreleased]
 
 ### Security
+- **Pre-publish security/architecture/SDL review — fixed 6 findings.** A
+  parallel multi-agent review (security, architecture, SDL/privacy, correctness)
+  of the shippable surface produced these fixes:
+  - **Cross-principal Private disclosure via `SupplementSubjectTriples` (HIGH,
+    the one publish blocker).** The subject-triple answer-context supplement
+    (`MemoryQueryApi.LoadSubjectTripleSupplement`) filtered only by workstream +
+    projection revocation — no visibility/principal/category/channel gate, unlike
+    every primary read path. In a shared multi-agent workstream, a co-member who
+    set the public `QueryRequest.SupplementSubjectTriples = true` flag could read
+    another principal's **Private** (Confidential/PII) fact triples. Now joins the
+    event + visibility sidecars and applies the same author-only gate + category/
+    channel scope + live-revocation check as the ranked paths. Regression test:
+    `SubjectScopedQueryTests.Subject_triple_supplement_enforces_author_only_private`.
+  - **Dreamer/fleet load paths bypassed visibility gating.** The offline
+    consolidation loaders (`DreamCoordinator.LoadEvents`/`LoadPriorSkills`/
+    `LoadOpenContradictions`, `FleetConsolidator.LoadSkillEvents`, and
+    `DerivedCitationResolver`) read raw events without the author-only Private
+    filter, so another principal's Private events/skills could be fed to the
+    dreamer LLM and re-emitted under the caller's principal (or, for fleet,
+    laundered into the global library). All now apply the visibility+principal
+    gate; the fleet miner refuses to mine non-shareable (Private) skills across
+    the isolation boundary.
+  - **Dream visibility override could raise a PII output above its ingest
+    default.** `SetVisibility` unconditionally overwrote the ingest-time default,
+    so a derived output whose *own* text contained PII (stamped Private at
+    ingest) could be published Shared/Global when its sources were benign. The
+    `ON CONFLICT` now keeps a Private ingest-default (`CASE WHEN existing = 0`),
+    never raising an output above what its own classification earned — while
+    still allowing benign→Global fleet promotion.
+  - **Curation `RevertCuration` missing workstream-scope check.** A revert-capable
+    token scoped to workstream A could revert curations in workstream B; it now
+    applies the same `cap.Workstream` guard as every other curation op.
+    Regression test: `SqliteMemoryCuratorTests.Revert_denies_a_capability_scoped_to_a_different_workstream`.
+  - **MCP `remember` idempotency/ULID accuracy.** Blank `event_id` now generates a
+    real (time-sortable) ULID instead of a GUID, and the tool description states
+    that idempotency holds only for a caller-supplied id. New `Mneme.Util.Ulid`
+    with tests.
+  - **Fleet audit `started_at` recorded completion time** instead of start time;
+    now captured before the dreamer runs.
 - **Fixed: ingest secret redaction was a silent no-op in DI-wired hosts.**
   Registering the redactor as `TryAddSingleton<IRedactor, RegexRedactor>()` let
   the DI container pick `RegexRedactor`'s greedy `IEnumerable<RedactionRule>`
@@ -165,6 +204,27 @@ release notes.
 - Package version is centralized in `Directory.Build.props` and overridable
   from the release tag; every package embeds README, LICENSE, NOTICE, XML docs,
   a symbol package, and Source Link.
+
+### Known limitations (v0.x)
+These were surfaced by the pre-publish review and consciously deferred for the
+alpha (tracked in `plans/backlog.md`); none affect the default single-agent
+surface, and the multi-agent isolation invariants are enforced.
+- **HITL `SplitFactAsync` / `MergeFactsAsync` are not yet implemented** — they
+  throw on call. The other curation ops (amend, annotate, pin, demote, revert)
+  are complete. Split/merge land in a Phase 7.5 follow-up.
+- **Curation history is a rebuildable projection, not a main-log payload.**
+  Curation ops are recorded in a `curation_events` table (with a `reverted_by`
+  update on revert) rather than as append-only `memory_events` payloads. The
+  main event log stays append-only and untouched by curation; a follow-up will
+  move curation onto the main log per locked decision #13.
+- **Erasure is content-tombstoning, not full purge.** `RevokeAsync` nulls the
+  artifact body; distilled derivatives in `payload_json`, `projection_*`, and FTS
+  are not yet cascaded. Full per-principal erasure (GDPR Art. 17) and per-
+  workstream export (Art. 20) are planned.
+- **Deep bi-temporal / sync items deferred:** superseded facts don't yet close
+  `invalid_at`/`expired_at` intervals; storage timestamps are ISO-8601 text (not
+  Unix-ms); snapshot sync doesn't carry principal/visibility or re-run
+  projections. These are v0.x internal-format items and will change pre-1.0.
 
 ### Notes
 - Pre-1.0 the public API may change between minor versions.

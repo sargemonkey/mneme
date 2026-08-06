@@ -159,16 +159,18 @@ public sealed class FleetConsolidatorTests : IDisposable
         var config = sp.GetRequiredService<WorkstreamConfigStore>();
         var fleet = sp.GetRequiredService<FleetConsolidator>();
 
-        // "Confidential ..." classifies the skill event as Confidential → the
-        // classification floor must skip it (no sensitive global skill).
+        // A skill whose own text is Confidential is stamped Private at ingest. The
+        // fleet miner must NOT load a non-shareable (Private) skill across the
+        // isolation boundary at all (F2 guardrail) — it is never fed to the
+        // dreamer, so it cannot be laundered into a global skill.
         await agent.IngestAsync(Skill("cf-a", "team-a", "Confidential handling of the escalation", "do the confidential thing"));
         config.SetParticipatesInCrossWorkstreamConsolidation(new WorkstreamId("team-a"), true);
 
         var summary = await fleet.ConsolidateFleetAsync(CrossToken());
 
-        Assert.Equal(1, summary.SkillsConsidered);
+        Assert.Equal(0, summary.SkillsConsidered); // Private skill excluded at mining, never seen by the dreamer
         Assert.Empty(summary.Promoted);
-        Assert.Equal(1, summary.SkippedIneligible);
+        Assert.Equal(0, summary.SkippedIneligible);
         Assert.Equal(0, GlobalSkillCount(sp, FleetConsolidator.DefaultGlobalWorkstream));
     }
 

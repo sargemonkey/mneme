@@ -139,9 +139,15 @@ public sealed class DreamCoordinatorTests : IDisposable
     {
         var (sp, agent, dream, token) = BuildHost(new SkillFromEvidenceDreamer());
         using var _d = sp;
-        // "Confidential …" → Classification.Confidential source; the dreamer asks
-        // for Global but the cap must force the derived skill to Private.
-        await agent.IngestAsync(Evidence("conf1", "Confidential customer escalation playbook"));
+        // The consolidating principal AUTHORS this Confidential source, so it is
+        // legitimately visible to the dream run (author-only Private). The dreamer
+        // asks for Global but the source-sensitivity cap must force the derived
+        // skill to Private.
+        await agent.IngestAsync(new CaptureEvent(
+            new EventId("conf1"), new WorkstreamId(Ws), EventChannel.Epistemic,
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+            new EvidencePayload("Confidential customer escalation playbook", "test"),
+            new CaptureProvenance(new CaptureSourceId("t"), token.Principal)));
 
         var summary = await dream.ConsolidateAsync(new WorkstreamId(Ws), token);
         var producedId = summary.Produced.Single().Value;

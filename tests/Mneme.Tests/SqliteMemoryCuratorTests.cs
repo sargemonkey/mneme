@@ -64,6 +64,24 @@ public sealed class SqliteMemoryCuratorTests : IDisposable
     }
 
     [Fact]
+    public async Task Revert_denies_a_capability_scoped_to_a_different_workstream()
+    {
+        // Regression: RevertCurationAsync must apply the same workstream-scope
+        // guard AppendCuration does. Before the fix, a revert-capable token scoped
+        // to workstream A could revert curations living in workstream B.
+        var ctx = BuildHost(); using var _ = ctx.sp;
+        var annotated = await ctx.curator.AnnotateAsync(ctx.seedEvent, "note", FullCap());
+        Assert.True(annotated.CurationEventId.HasValue);
+
+        await Assert.ThrowsAsync<CapabilityDeniedError>(
+            () => ctx.curator.RevertCurationAsync(annotated.CurationEventId, "undo", FullCap("other-ws")));
+
+        // The correctly-scoped token still works (control).
+        var reverted = await ctx.curator.RevertCurationAsync(annotated.CurationEventId, "undo", FullCap());
+        Assert.True(reverted.CurationEventId.HasValue);
+    }
+
+    [Fact]
     public async Task Amend_with_correct_pre_state_hash_succeeds()
     {
         var ctx = BuildHost(); using var _ = ctx.sp;

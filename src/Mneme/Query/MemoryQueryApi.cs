@@ -163,7 +163,10 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
         IReadOnlyList<SubjectTripleHit>? subjectTriples = null;
         if (request.SupplementSubjectTriples && hasFreeText && spec.Workstream is not null && !resolved.CrossWorkstream)
         {
-            subjectTriples = LoadSubjectTripleSupplement(spec.Workstream.Value, spec.FreeText!, limit);
+            subjectTriples = LoadSubjectTripleSupplement(
+                spec.Workstream.Value, spec.FreeText!, limit,
+                resolved.EffectiveCategories, spec.Channel,
+                spec.Principal?.Value, resolved.Viewer.Value);
         }
 
         return new QueryResult(items, totalMatched, explain, subjectTriples);
@@ -606,7 +609,10 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
         return map;
     }
 
-    private IReadOnlyList<SubjectTripleHit> LoadSubjectTripleSupplement(WorkstreamId workstream, string freeText, int limit)
+    private IReadOnlyList<SubjectTripleHit> LoadSubjectTripleSupplement(
+        WorkstreamId workstream, string freeText, int limit,
+        IReadOnlyCollection<EpistemicCategory> categories, EventChannel channel,
+        string? principalFilter, string viewer)
     {
         var subjectKeys = SubjectKey.ExtractSubjects(freeText);
         if (subjectKeys.Count == 0) return Array.Empty<SubjectTripleHit>();
@@ -618,14 +624,44 @@ public sealed class MemoryQueryApi : IMemoryQueryAPI
         using var cmd = c.CreateCommand();
         // One query for all subject keys (OR-joined) instead of a query per key.
         var ors = string.Join(" OR ", subjectKeys.Select((_, i) =>
-            $"(subject_key LIKE '%' || $k{i} || '%' OR $k{i} LIKE '%' || subject_key || '%')"));
+            $"(t.subject_key LIKE '%' || $k{i} || '%' OR $k{i} LIKE '%' || t.subject_key || '%')"));
+        // This supplemental content path must apply the SAME access gate as the
+        // primary read paths: category/channel/principal scope plus the
+        // author-only visibility rule (a Private triple is readable only by its
+        // author). It also honours live revocation, not just the projection's
+        // possibly-stale revoked_at. Omitting this leaked another principal's
+        // Private (PII/Confidential) fact triples across a shared workstream.
+        var singleCategory = categories.Count == 1;
+        var categoryPredicate = singleCategory
+            ? "e.category = $cat"
+            : "e.category IN (SELECT value FROM json_each($cats))";
         cmd.CommandText = $"""
-            SELECT subject_text, predicate, object, valid_at, event_id
-            FROM projection_fact_triples
-            WHERE workstream_id = $ws AND revoked_at IS NULL AND ({ors})
-            ORDER BY valid_at DESC;
+            SELECT t.subject_text, t.predicate, t.object, t.valid_at, t.event_id
+            FROM projection_fact_triples t
+            JOIN memory_events e            ON e.event_id = t.event_id
+            LEFT JOIN memory_visibility v   ON v.event_id = t.event_id
+            LEFT JOIN memory_revocations rv ON rv.event_id = t.event_id
+            WHERE t.workstream_id = $ws AND t.revoked_at IS NULL AND rv.event_id IS NULL
+              AND e.event_channel = $channel
+              AND {categoryPredicate}
+              AND ($principal IS NULL OR e.principal_id = $principal)
+              AND (COALESCE(v.visibility, 1) >= 1 OR e.principal_id = $viewer)
+              AND ({ors})
+            ORDER BY t.valid_at DESC;
             """;
         cmd.Parameters.AddWithValue("$ws", workstream.Value);
+        cmd.Parameters.AddWithValue("$channel", (int)channel);
+        if (singleCategory)
+        {
+            cmd.Parameters.AddWithValue("$cat", (int)categories.First());
+        }
+        else
+        {
+            cmd.Parameters.AddWithValue("$cats", System.Text.Json.JsonSerializer.Serialize(
+                categories.Select(x => (int)x).ToArray()));
+        }
+        cmd.Parameters.AddWithValue("$principal", (object?)principalFilter ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$viewer", viewer);
         for (var i = 0; i < subjectKeys.Count; i++) cmd.Parameters.AddWithValue($"$k{i}", subjectKeys[i]);
         using var rd = cmd.ExecuteReader();
         while (rd.Read() && hits.Count < cap)
