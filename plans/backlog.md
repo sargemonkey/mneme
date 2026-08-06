@@ -9,6 +9,16 @@
 > **Phase numbering matches** [`../README.md`](../README.md) roadmap and
 > the section structure of [`plan.md`](plan.md). Keep them in sync.
 
+> **Current status (2026-08):** Phases 0–14 are implemented and covered by
+> tests; the substrate is feature-complete for a v1. The authoritative
+> shipped-status is [`../README.md`](../README.md) ("Status") +
+> [`../CHANGELOG.md`](../CHANGELOG.md) — some per-item `[ ]` markers in
+> Phases 0–12 predate consistent check-off discipline and lag behind the
+> code. Remaining `[ ]` items that are *genuinely* future work: the v2
+> features in Phase 11 (native `sqlite-vec` index, autonomous capture) and
+> the cross-cutting export / doctor / trace-buffer tooling near the end of
+> this file.
+
 ## Status legend
 
 - `[ ]` — not started
@@ -927,8 +937,13 @@ turn-based conversation into epistemic memory.
   `dotnet test` on push to main and on PRs. Should fail on warnings.
   *(Shipped: `.github/workflows/ci.yml` — Release build with
   warnings-as-errors + test on push/PR to `main`.)*
-- [ ] **release-automation** — Workflow that packs + pushes NuGet on
-  tag. Skip until at least one Phase has a tagged release.
+- [x] **release-automation** — Workflow that packs + pushes NuGet on
+  tag. *(Shipped: `.github/workflows/release.yml` — a pushed `v*` tag (or a
+  `workflow_dispatch` with a dry-run toggle) restores/builds/tests/packs the
+  solution, uploads the `.nupkg`/`.snupkg`, pushes to nuget.org via the
+  `NUGET_API_KEY` secret with `--skip-duplicate`, and cuts a GitHub Release.
+  The tag version overrides the csproj `<Version>`, so the tag is the single
+  source of truth for a release.)*
 - [x] **docs-adr-index** — Set up `docs/adr/` with the
   [MADR template](https://adr.github.io/madr/). First ADR: "Why
   SQLite as the only embedded backend" (consolidate

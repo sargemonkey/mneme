@@ -23,7 +23,12 @@ Reviewed and confirmed clean:
   curation enforces per-op grants + target-workstream scope; no raw-SQL escape
   hatch on the public surface.
 - **Secret handling** — redaction runs before persist and covers all payload
-  variants including `FactPayload.Triples` subject/object.
+  variants including `FactPayload.Triples` subject/object. *(Post-review
+  follow-up: DI-wired hosts were registering the redactor via a constructor
+  that resolved to an **empty** rule set — a silent no-op — so redaction
+  stripped nothing on those ingest paths. Fixed to construct the default rule
+  set on every path; see CHANGELOG "Fixed: ingest secret redaction was a
+  silent no-op in DI-wired hosts" and its regression test.)*
 - **Deserialization** — `System.Text.Json` polymorphism is a closed
   `[JsonDerivedType]` set; the `$type` discriminator cannot instantiate
   arbitrary types.
