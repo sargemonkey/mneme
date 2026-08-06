@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using System.Reflection;
 using Mneme.Contracts;
 using Mneme.Hosting;
 using Mneme.Mcp;
@@ -69,12 +70,24 @@ public static class Program
             CanSplit: true, CanMerge: true, CanRevert: true, CanReview: true));
 
         builder.Services
-            .AddMcpServer(o => o.ServerInfo = new() { Name = "Mneme.Mcp", Version = "0.0.1-alpha.1" })
+            .AddMcpServer(o => o.ServerInfo = new() { Name = "Mneme.Mcp", Version = ServerVersion() })
             .WithStdioServerTransport()
             .WithToolsFromAssembly(typeof(MnemeMcpTools).Assembly);
 
         var app = builder.Build();
         await app.RunAsync();
         return 0;
+    }
+
+    // Reported MCP server version tracks the assembly (csproj <Version>), so it
+    // can never drift from the released package version. Strips any '+build'
+    // metadata SourceLink appends to the informational version.
+    private static string ServerVersion()
+    {
+        var info = Assembly.GetExecutingAssembly()
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        if (string.IsNullOrEmpty(info)) return "0.0.0";
+        var plus = info.IndexOf('+');
+        return plus >= 0 ? info[..plus] : info;
     }
 }

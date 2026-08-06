@@ -16,7 +16,7 @@
     <Product>Mneme</Product>
     <!-- Single source of truth for the package version across all packable
          projects. CI release overrides this via -p:Version=<tag>. -->
-    <Version>0.0.1-alpha.1</Version>
+    <Version>0.1.0-alpha</Version>
     <Copyright>Copyright (c) 2026 Mneme contributors</Copyright>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/jacobmsft/mneme</PackageProjectUrl>

@@ -9,6 +9,13 @@ release notes.
 
 ## [Unreleased]
 
+_No unreleased changes yet._
+
+## [0.1.0-alpha] - 2026-08-06
+
+First public preview release. Packages: `Mneme`, `Mneme.Contracts` (folded
+into `Mneme`), `Mneme.Agents.AI`, `Mneme.Mcp`.
+
 ### Security
 - **Pre-publish security/architecture/SDL review — fixed 6 findings.** A
   parallel multi-agent review (security, architecture, SDL/privacy, correctness)
@@ -228,5 +235,6 @@ surface, and the multi-agent isolation invariants are enforced.
 
 ### Notes
 - Pre-1.0 the public API may change between minor versions.
-- First planned release: `Mneme` / `Mneme.Agents.AI` / `Mneme.Mcp` at
-  `0.1.0-alpha`.
+- First public release of `Mneme` / `Mneme.Agents.AI` / `Mneme.Mcp` at
+  `0.1.0-alpha`. Published by pushing the `v0.1.0-alpha` tag (the release
+  workflow derives the package version from the tag).
