@@ -186,6 +186,55 @@ public sealed class DreamGuardrailsTests : IDisposable
     }
 
     [Fact]
+    public async Task Derived_traversal_hides_a_non_author_private_source_and_revoked_sources()
+    {
+        // Second-order: citation traversal is a back-channel that must apply the
+        // same author-only visibility gate as the read paths, plus exclude revoked
+        // sources — otherwise a derived event's provenance leaks the existence/id
+        // of another principal's Private source.
+        var services = new ServiceCollection();
+        services.AddMneme(o => { o.WorkstreamId = "guard-vis"; o.SqlitePath = Path.Combine(_tmpDir, "gvis.db"); o.UserId = "host"; });
+        using var sp = services.BuildServiceProvider();
+        var ws = new WorkstreamId("guard-vis");
+        var agent = sp.GetRequiredService<IMemoryAgent>();
+        var resolver = sp.GetRequiredService<DerivedCitationResolver>();
+        var revoke = sp.GetRequiredService<Mneme.Revocation.IRevocationService>();
+
+        CaptureEvent Ev(string id, string principal, string content) => new(
+            new EventId(id), ws, EventChannel.Epistemic, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+            new EvidencePayload(content, "t"), new CaptureProvenance(new CaptureSourceId("t"), new PrincipalId(principal)));
+
+        await agent.IngestAsync(Ev("src-pub", "alice", "the deploy finished"));      // Shared
+        await agent.IngestAsync(Ev("src-priv", "alice", "Confidential: NDA terms")); // Private (alice)
+        await agent.IngestAsync(Ev("src-rev", "alice", "temporary note"));           // Shared, then revoked
+        await revoke.RevokeAsync(new EventId("src-rev"), ws, new PrincipalId("alice"), "test");
+
+        await agent.IngestAsync(new CaptureEvent(
+            new EventId("derived-1"), ws, EventChannel.Epistemic, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+            new SkillPayload("s", "do", null, Array.Empty<EventId>()),
+            new CaptureProvenance(new CaptureSourceId("consolidator"), new PrincipalId("bob"),
+                Citation: new Citation.Derived(
+                    new[] { new EventId("src-pub"), new EventId("src-priv"), new EventId("src-rev") }, "c@1"))));
+
+        CapabilityToken Tok(string principal) => new(
+            Principal: new PrincipalId(principal), Workstream: ws,
+            NotBefore: DateTimeOffset.UtcNow.AddMinutes(-1), NotAfter: DateTimeOffset.UtcNow.AddDays(1),
+            AllowedCategories: Array.Empty<EpistemicCategory>());
+
+        // Bob is not the author of the Private source → traversal hides it; the
+        // revoked source is hidden from everyone.
+        var asBob = resolver.ResolveAuthorizedSources(new EventId("derived-1"), Tok("bob"));
+        Assert.Contains(new EventId("src-pub"), asBob);
+        Assert.DoesNotContain(new EventId("src-priv"), asBob);
+        Assert.DoesNotContain(new EventId("src-rev"), asBob);
+
+        // Alice authored the Private source → she may traverse to it; revoked stays hidden.
+        var asAlice = resolver.ResolveAuthorizedSources(new EventId("derived-1"), Tok("alice"));
+        Assert.Contains(new EventId("src-priv"), asAlice);
+        Assert.DoesNotContain(new EventId("src-rev"), asAlice);
+    }
+
+    [Fact]
     public async Task Consolidation_run_is_audited()
     {
         var services = new ServiceCollection();

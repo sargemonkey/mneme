@@ -175,6 +175,48 @@ public sealed class FleetConsolidatorTests : IDisposable
     }
 
     [Fact]
+    public async Task Fleet_does_not_mine_a_benign_text_skill_that_was_capped_private()
+    {
+        // Second-order F2: the classification floor keys on the skill's OWN text
+        // (benign → Public → eligible), so it CANNOT catch the real laundering
+        // vector — a skill whose text is benign but whose VISIBILITY was capped
+        // Private (dream-capped from a sensitive source). Only the visibility
+        // filter at mining stops it.
+        using var sp = BuildHost(new FusingDreamer());
+        var agent = sp.GetRequiredService<IMemoryAgent>();
+        var config = sp.GetRequiredService<WorkstreamConfigStore>();
+        var fleet = sp.GetRequiredService<FleetConsolidator>();
+
+        // Benign skill text → classifies Public (the floor would PASS this)...
+        await agent.IngestAsync(Skill("launder-a", "team-a", "guard retries with a key", "verify the idempotency key"));
+        // ...but its visibility was capped Private (simulating a dream-cap).
+        ForceVisibility(sp, "launder-a", Visibility.Private);
+        config.SetParticipatesInCrossWorkstreamConsolidation(new WorkstreamId("team-a"), true);
+
+        var summary = await fleet.ConsolidateFleetAsync(CrossToken());
+
+        Assert.Equal(0, summary.SkillsConsidered); // excluded at mining by visibility, not by the floor
+        Assert.Empty(summary.Promoted);
+        Assert.Equal(0, GlobalSkillCount(sp, FleetConsolidator.DefaultGlobalWorkstream));
+    }
+
+    private static void ForceVisibility(ServiceProvider sp, string eventId, Visibility v)
+    {
+        var factory = sp.GetRequiredService<Mneme.Storage.SqliteConnectionFactory>();
+        using var c = factory.Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO memory_visibility(event_id, workstream_id, visibility, set_at)
+            VALUES ($e, (SELECT workstream_id FROM memory_events WHERE event_id = $e), $v, $at)
+            ON CONFLICT(event_id) DO UPDATE SET visibility = excluded.visibility;
+            """;
+        cmd.Parameters.AddWithValue("$e", eventId);
+        cmd.Parameters.AddWithValue("$v", (int)v);
+        cmd.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+        cmd.ExecuteNonQuery();
+    }
+
+    [Fact]
     public async Task Requires_a_cross_workstream_token()
     {
         using var sp = BuildHost(new FusingDreamer());

@@ -197,6 +197,35 @@ public sealed class SubjectScopedQueryTests : IDisposable
         Assert.Contains(asAuthor.SubjectTriples!, h => h.Triple.Subject == "Zeus");
     }
 
+    [Fact]
+    public async Task Subject_boost_does_not_inject_a_non_authors_private_fact()
+    {
+        // Second-order sibling of F1: the subject-attribution BOOST injects a
+        // subject-matched fact into the RANKED items even without lexical overlap.
+        // That injection must also honour the author-only Private gate — it must
+        // not surface another principal's Private fact.
+        using var sp = Build("kgq-boost");
+        var agent = sp.GetRequiredService<IMemoryAgent>();
+        var vectors = sp.GetRequiredService<VectorIndex>();
+        var query = sp.GetRequiredService<IMemoryQueryAPI>();
+        var ws = new WorkstreamId("kgq-boost");
+
+        // A Confidential (→Private) fact about Zeus, authored by alice, whose words
+        // don't overlap the question — only the subject-boost would surface it.
+        await agent.IngestAsync(FactBy("zboost", "kgq-boost",
+            "Confidential: Zeus volunteers at the shelter on weekends",
+            new FactTriple("Zeus", "volunteers_at", "shelter"), "alice"));
+        await vectors.BackfillAsync(ws);
+
+        var asOther = await query.QueryAsync(new QueryRequest(
+            new QuerySpec(ws, FreeText: "Where does Zeus spend free time?")), TokenFor("kgq-boost", "mallory"));
+        Assert.DoesNotContain(asOther.Items, i => i.EventId.Value == "zboost");
+
+        var asAuthor = await query.QueryAsync(new QueryRequest(
+            new QuerySpec(ws, FreeText: "Where does Zeus spend free time?")), TokenFor("kgq-boost", "alice"));
+        Assert.Contains(asAuthor.Items, i => i.EventId.Value == "zboost");
+    }
+
     private static CaptureEvent FactBy(string id, string ws, string statement, FactTriple triple, string principal) =>
         new(new EventId(id), new WorkstreamId(ws), EventChannel.Epistemic,
             DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,

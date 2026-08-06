@@ -131,4 +131,50 @@ public sealed class VisibilityTierTests : IDisposable
             TokenFor("author-x"));
         Assert.Contains(asAuthor.Items, i => i.EventId.Value == "st1");
     }
+
+    [Fact]
+    public async Task Cross_workstream_token_does_not_cross_principal_visibility()
+    {
+        // Second-order: a workstream-crossing grant is NOT a principal-crossing
+        // grant. A cross-workstream token still cannot read another principal's
+        // Private events — the two axes (workstream scope, author visibility) are
+        // independent.
+        var (sp, agent, query) = BuildHost();
+        using var _ = sp;
+        await agent.IngestAsync(Event("p1", "author-x", "Confidential: internal-only pricing"));
+        await agent.IngestAsync(Event("s1", "author-x", "the build passed"));
+
+        CapabilityToken Cross(string principal) => new(
+            Principal: new PrincipalId(principal), Workstream: null,
+            NotBefore: DateTimeOffset.UtcNow.AddMinutes(-1), NotAfter: DateTimeOffset.UtcNow.AddDays(1),
+            AllowedCategories: Array.Empty<EpistemicCategory>(), CrossWorkstream: true);
+
+        var asOther = await query.QueryAsync(new QueryRequest(new QuerySpec(Workstream: null)), Cross("viewer-y"));
+        Assert.DoesNotContain(asOther.Items, i => i.EventId.Value == "p1"); // A's Private hidden
+        Assert.Contains(asOther.Items, i => i.EventId.Value == "s1");       // Shared still visible
+
+        var asAuthor = await query.QueryAsync(new QueryRequest(new QuerySpec(Workstream: null)), Cross("author-x"));
+        Assert.Contains(asAuthor.Items, i => i.EventId.Value == "p1");      // author sees own Private
+    }
+
+    [Fact]
+    public async Task Data_subject_filter_still_hides_that_subjects_private_from_others()
+    {
+        // Second-order: QuerySpec.Principal ("whose events" / data-subject access)
+        // composes with the viewer gate. Asking for author-x's events as viewer-y
+        // returns only author-x's Shared events — never their Private.
+        var (sp, agent, query) = BuildHost();
+        using var _ = sp;
+        await agent.IngestAsync(Event("ap", "author-x", "Confidential: acquisition shortlist"));
+        await agent.IngestAsync(Event("as", "author-x", "shipped the release notes"));
+
+        var asOther = await query.QueryAsync(new QueryRequest(
+            new QuerySpec(new WorkstreamId(Ws), Principal: new PrincipalId("author-x"))), TokenFor("viewer-y"));
+        Assert.Contains(asOther.Items, i => i.EventId.Value == "as");
+        Assert.DoesNotContain(asOther.Items, i => i.EventId.Value == "ap");
+
+        var asSelf = await query.QueryAsync(new QueryRequest(
+            new QuerySpec(new WorkstreamId(Ws), Principal: new PrincipalId("author-x"))), TokenFor("author-x"));
+        Assert.Contains(asSelf.Items, i => i.EventId.Value == "ap");
+    }
 }
