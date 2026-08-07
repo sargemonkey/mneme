@@ -11,9 +11,14 @@
     <header class="hdr">
         <div class="title">
             <h1>Mneme <span class="x">×</span> ACP</h1>
-            <button class="sleep" @onclick="Sleep" disabled="@_sleeping">
-                @(_sleeping ? "💤 consolidating…" : "😴 Sleep — condense memory")
-            </button>
+            <div class="hdr-actions">
+                <button class="clear" @onclick="Clear" disabled="@(_playing || _busy || _clearing)">
+                    @(_clearing ? "🧹 clearing…" : "🧹 Clear")
+                </button>
+                <button class="sleep" @onclick="Sleep" disabled="@_sleeping">
+                    @(_sleeping ? "💤 consolidating…" : "😴 Sleep — condense memory")
+                </button>
+            </div>
         </div>
         <div class="meta">
             agent: <code>@Chat.AgentName</code> ·
@@ -166,6 +171,7 @@
 
     private ContextBundle? _bundle;
     private bool _sleeping;
+    private bool _clearing;
 
     private bool HasNext => _loaded is not null && _cursor < _loaded.Turns.Count;
 
@@ -173,7 +179,7 @@
     {
         await Chat.EnsureStartedAsync();
         _corpus = CorpusLoader.Load();
-        if (_corpus.Count > 0) _selectedId = _corpus[0].Id;
+        if (_corpus.Count > 0) _selectedId = (_corpus.FirstOrDefault(c => c.Id == "demo-project") ?? _corpus[0]).Id;
         await RefreshMemory();
     }
 
@@ -264,6 +270,23 @@
         StateHasChanged();
         try { _bundle = await Chat.SleepAsync(); }
         finally { _sleeping = false; }
+    }
+
+    private async Task Clear()
+    {
+        if (_playing || _busy) return;
+        _clearing = true;
+        StateHasChanged();
+        try
+        {
+            await Chat.ClearAsync();
+            _loaded = null;
+            _cursor = 0;
+            _bundle = null;
+            _memory = Array.Empty<QueryResultItem>();
+            await RefreshMemory();
+        }
+        finally { _clearing = false; }
     }
 
     private void CloseSleep() => _bundle = null;

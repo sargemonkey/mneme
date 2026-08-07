@@ -1,5 +1,6 @@
 using Mneme.Contracts;
 using Mneme.Revocation;
+using Mneme.Storage;
 using Mneme.Studio.Agent.Acp;
 using EventId = Mneme.Contracts.EventId;
 
@@ -26,6 +27,7 @@ internal sealed class AgentChatService : IAsyncDisposable
     private readonly IMemoryAgent _memory;
     private readonly IMemoryQueryAPI _query;
     private readonly IRevocationService _revocation;
+    private readonly SqliteConnectionFactory _connections;
     private readonly CapabilityToken _token;
     private readonly IChatCompletion? _distillerLlm;
     private readonly AcpAgentConnection _conn = new();
@@ -42,18 +44,20 @@ internal sealed class AgentChatService : IAsyncDisposable
         IMemoryAgent memory,
         IMemoryQueryAPI query,
         IRevocationService revocation,
+        SqliteConnectionFactory connections,
         CapabilityToken token,
         IEnumerable<IChatCompletion> distillerLlms)
     {
         _memory = memory;
         _query = query;
         _revocation = revocation;
+        _connections = connections;
         _token = token;
         _distillerLlm = distillerLlms.FirstOrDefault();
     }
 
     public WorkstreamId Workstream => _token.Workstream ?? new WorkstreamId("studio-agent");
-    public SessionId Session { get; } = new($"acp-{Guid.NewGuid():n}");
+    public SessionId Session { get; private set; } = new($"acp-{Guid.NewGuid():n}");
     public IReadOnlyList<ChatTurn> Transcript => _transcript;
     public string AgentName => _conn.AgentName;
     public string LastWatermark { get; private set; } = "<none>";
@@ -201,6 +205,64 @@ internal sealed class AgentChatService : IAsyncDisposable
         => await _query.DistillAsync(
             Workstream, new DistillOptions(ForceRefresh: true, TokenBudget: tokenBudget), _token, ct)
             .ConfigureAwait(false);
+
+    /// <summary>
+    /// "Clear": start completely fresh. Resets the host-owned conversation
+    /// (transcript + context buffer + counters), starts a new session, and wipes
+    /// the workstream's distilled memory so the panels are empty again.
+    /// <para>
+    /// This is a <em>demo maintenance</em> operation. Mneme's log is append-only,
+    /// so a production consumer would either revoke individual events
+    /// (<see cref="IRevocationService"/>) or switch to a fresh workstream rather
+    /// than truncate the store; here we truncate the app's own throwaway database
+    /// to give the demo a genuine clean slate on one click.
+    /// </para>
+    /// </summary>
+    public Task ClearAsync(CancellationToken ct = default)
+    {
+        _transcript.Clear();
+        _buffer.Clear();
+        _seq = 0;
+        TotalDistilled = 0;
+        TotalDropped = 0;
+        LastWatermark = "<none>";
+        Session = new SessionId($"acp-{Guid.NewGuid():n}");
+        WipeStore();
+        return Task.CompletedTask;
+    }
+
+    // Truncate every data table in the app's throwaway SQLite database while
+    // preserving the schema (and its version row). The FTS5 index is cleared via
+    // its own virtual table; its shadow tables are left alone. FK enforcement is
+    // disabled for the wipe so table order doesn't matter.
+    private void WipeStore()
+    {
+        using var c = _connections.Open();
+        using (var off = c.CreateCommand()) { off.CommandText = "PRAGMA foreign_keys = OFF;"; off.ExecuteNonQuery(); }
+
+        var tables = new List<string>();
+        using (var q = c.CreateCommand())
+        {
+            q.CommandText =
+                "SELECT name FROM sqlite_master WHERE type='table' " +
+                "AND name NOT LIKE 'sqlite_%' AND name <> 'schema_meta' " +
+                "AND name NOT LIKE 'event_text_index%' " +          // exclude FTS virtual + shadow tables
+                "AND (sql IS NULL OR sql NOT LIKE 'CREATE VIRTUAL%');";
+            using var r = q.ExecuteReader();
+            while (r.Read()) tables.Add(r.GetString(0));
+        }
+
+        using var tx = c.BeginTransaction();
+        using (var d = c.CreateCommand()) { d.Transaction = tx; d.CommandText = "DELETE FROM event_text_index;"; d.ExecuteNonQuery(); }
+        foreach (var t in tables)
+        {
+            using var d = c.CreateCommand();
+            d.Transaction = tx;
+            d.CommandText = $"DELETE FROM \"{t}\";";
+            d.ExecuteNonQuery();
+        }
+        tx.Commit();
+    }
 
     private void AddTurn(string role, string text, DateTimeOffset at, ContextEntryKind kind)
     {

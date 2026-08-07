@@ -43,6 +43,18 @@ html, body {
 }
 .sleep:disabled { opacity: .6; cursor: default; }
 
+.hdr-actions { display: flex; align-items: center; gap: 8px; }
+.clear {
+    padding: 6px 14px;
+    border-radius: 8px;
+    border: 1px solid #6b7280;
+    background: #2b2f36;
+    color: #cbd5e1;
+    font-weight: 600;
+    cursor: pointer;
+}
+.clear:disabled { opacity: .5; cursor: default; }
+
 .cols { display: grid; grid-template-columns: 1.4fr 1fr; gap: 0; flex: 1; min-height: 0; }
 
 section { display: flex; flex-direction: column; min-height: 0; padding: 14px 18px; }
