@@ -908,6 +908,92 @@ while keeping every derived memory auditable and boundary-safe.
 
 ---
 
+## Phase 15 — Domain profiles (Profile SDK + first profile: Mneme.Writer)
+
+Gated by **ADR-0005** (`docs/adr/0005-domain-profiles.md`, status
+Proposed). Turns Mneme into a **base + profiles** platform: base gains a
+small Profile SDK (extension seams); domains ship *compiled* satellite
+packages (`Mneme.Writer`, later `Mneme.Research`, …) that register
+payloads/projections/queries without forking the substrate or reopening
+the closed-set deserialization safety. First consumer: MuxiMuxi's writer
+domain (a live Mneme consumer whose continuity gaps are substrate-shaped).
+
+### 15.A — Base Profile SDK (in `Mneme` / `Mneme.Contracts`)
+
+- [ ] **profile-payload-registry** — Replace the static `[JsonDerivedType]`
+  union on `EventPayload` with a composition-time `IJsonTypeInfoResolver`
+  built from registered `IPayloadDescriptor { Type, Discriminator,
+  Category, RedactableFields, ExtractText, Summarize }`. Migrate the 8
+  built-ins to descriptors (the "core profile"). Closed-set safety
+  preserved: only registered types resolve; unknown `$type` rejected.
+  Tests: round-trip every payload, unknown-`$type` rejected, resolver =
+  base ∪ enabled profiles.
+- [ ] **profile-redaction-seam** — `PayloadRedactor` consumes each
+  descriptor's `RedactableFields` instead of the exhaustive switch;
+  **fail closed** (undeclared payload → redact all string fields). Keep
+  `FactPayload.Triples` subject/object coverage. (Locked decision #11.)
+- [ ] **profile-text-seam** — `TextSearchIngestObserver` uses the
+  descriptor's `ExtractText` instead of switching on payload type.
+- [ ] **profile-summary-seam** — `DistillationPromptBuilder` / summary
+  paths use the descriptor's `Summarize` instead of the payload switch.
+- [ ] **profile-schema-module** — `ISchemaModule { Name; Version;
+  ApplyDdl(conn) }`. `SqliteSchema.Initialize` runs core DDL + registered
+  modules idempotently; per-module version tracked in `schema_meta`
+  (namespaced). A module may only create/write its own tables.
+- [ ] **profile-projector-registration** — Profile-scoped `IProjector`
+  registration into `ProjectorPipeline` (both the default list and DI);
+  registered projectors participate in `RebuildAll`.
+- [ ] **profile-imnemeprofile** — `IMnemeProfile` + `MnemeProfileBuilder`
+  + `services.AddMneme(…).AddMnemeProfile<T>()`. Refactor the built-in
+  payloads/projectors/schema into a `CoreProfile` that is registered the
+  same way (dogfood the SDK). Docs: "authoring a Mneme profile."
+- [ ] **profile-sdk-tests** — Round-trip + rebuild-from-log with a
+  registered *test* profile; redaction-coverage regression; a projector
+  from a profile survives `RebuildAll`.
+
+### 15.B — `Mneme.Writer` profile package (depends on `Mneme`)
+
+Field names aligned to MuxiMuxi's existing `ClaimStore` / thread record
+shapes (see the writer-domain agent) so it is drop-in.
+
+- [ ] **writer-project** — New packable `src/Mneme.Writer/` csproj
+  depending on the `Mneme` package (+ `Mneme.Contracts`); NuGet metadata;
+  add to `Mneme.slnx`; release-workflow packs it.
+- [ ] **writer-authoring-claim-payload** — `AuthoringClaimPayload`
+  (subject_entity, attribute, value, assertion, thread_id, story_time,
+  reveal_time, grounding_mode, source_ref) + its `IPayloadDescriptor`.
+  Rides under `Fact`/`Evidence`. Redactable fields declared.
+- [ ] **writer-claims-into-triples** — Project authoring claims into the
+  existing `projection_fact_triples` (subject_key / predicate / object) so
+  base **contradiction detection covers narrative continuity for free** —
+  the structured `(subject, attribute, value)` substrate the writer domain
+  is missing under its LLM `Reconcile` pass.
+- [ ] **writer-bitemporal** — Use `valid_at` = story-time, `recorded_at`
+  = reveal/discourse-time; an "as-of-section / what the reader knows as of
+  chapter N" query. (Closes the writer domain's single-axis Timeline gap.)
+- [ ] **writer-thread-projection** — Persisted thread **status**
+  (open / resolved / dangling) projection over `thread:<slug>` records
+  (the writer domain has threads but no persisted status).
+- [ ] **writer-commitment-ledger** — Setup→payoff projection + an
+  "unpaid promises / dangling setups" query (the writer domain's mostly-
+  absent gap).
+- [ ] **writer-distiller** — Narrative `ISessionDistiller` extraction
+  prompt (characters/claims/relationships/world-rules/foreshadow seeds,
+  each tagged with story-time + reveal-time + grounding-mode).
+- [ ] **writer-query-service** — `IWriterMemory`: character/entity
+  dossier, continuity check, unpaid-promise, as-of-section — over the base
+  query API + the writer projections.
+- [ ] **writer-profile** — `WriterProfile : IMnemeProfile` +
+  `AddMnemeWriterProfile()`; sample; per-type tests.
+
+### 15.C — MuxiMuxi integration *(tracked in `devsanity-ai/muximuxi`, not here)*
+
+- [ ] Swap `MuxiMuxi.Writer` onto the `Mneme.Writer` package; solution
+  diverges per domain (expected). Feed the deterministic contradiction
+  output into the existing `Reconcile`/Findings surface as a pre-filter.
+
+---
+
 ## Consumer sample — Mneme.Studio.Agent (ACP desktop app)
 
 Not a substrate phase; a reference consumer that exercises the full
