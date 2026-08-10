@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>Mneme.Writer</PackageId>
+    <Title>Mneme.Writer</Title>
+    <Description>Writing-domain profile for Mneme (satellite package). Adds a first-class authoring-claim ontology — structured subject/attribute/value canon that feeds Mneme's deterministic contradiction engine for manuscript continuity checking, with story-time vs reveal-time bi-temporality. Covers fiction, non-fiction, articles, and research papers. Depends on the base Mneme package.</Description>
+    <PackageTags>memory;agent;ai;writing;authoring;fiction;manuscript;continuity;mneme;profile</PackageTags>
+    <IsPackable>true</IsPackable>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Satellite depends on the published base Mneme package (which folds in
+         Mneme.Contracts). Contracts is referenced directly for compile access
+         but with PrivateAssets="all" so it does NOT become a phantom package
+         dependency — at runtime the base Mneme package already carries
+         Mneme.Contracts.dll (same pattern as Mneme.csproj). -->
+    <ProjectReference Include="..\Mneme\Mneme.csproj" />
+    <ProjectReference Include="..\Mneme.Contracts\Mneme.Contracts.csproj" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\LICENSE" Pack="true" PackagePath="\" />
+    <None Include="..\..\NOTICE" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>

@@ -9,7 +9,27 @@ release notes.
 
 ## [Unreleased]
 
-_No unreleased changes yet._
+### Added
+- **`Mneme.Writer` — first domain profile (satellite package).** A new packable
+  package that teaches the substrate the writing domain's ontology (ADR-0005 /
+  Phase 15.B, thin vertical slice). It adds `AuthoringClaimPayload` — a
+  structured `(subject, attribute, value)` authoring claim, a superset of a flat
+  manuscript claim — whose `AuthoringCanonProjector` projects into the **shared**
+  `projection_fact_triples` index and runs the shared contradiction engine, so
+  **manuscript continuity checking is deterministic** (two scenes that disagree
+  about the same subject + attribute surface as a conflict) instead of a flat
+  digest handed to an LLM. Read surface: capability-guarded
+  `IWriterMemory.GetContinuityConflictsAsync`. Depends only on the base `Mneme`
+  package; ships no schema of its own (reuses `projection_fact_triples` +
+  `memory_contradictions`).
+
+### Changed
+- **Base: extracted a reusable `FactTripleProjection` seam** (public, in
+  `Mneme.Projections.Projectors`) with `WriteTriples` + `DetectContradictions`,
+  so domain-profile projectors can feed the same canon + contradiction substrate
+  the built-in Fact projectors use. `FactTriplesProjector` and
+  `ContradictionsProjector` now delegate to it — behaviour is identical (no
+  functional change; all existing tests pass unchanged).
 
 ## [0.1.0-alpha] - 2026-08-06
 

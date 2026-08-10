@@ -962,18 +962,30 @@ domain (a live Mneme consumer whose continuity gaps are substrate-shaped).
 Field names aligned to MuxiMuxi's existing `ClaimStore` / thread record
 shapes (see the writer-domain agent) so it is drop-in.
 
-- [ ] **writer-project** — New packable `src/Mneme.Writer/` csproj
-  depending on the `Mneme` package (+ `Mneme.Contracts`); NuGet metadata;
-  add to `Mneme.slnx`; release-workflow packs it.
-- [ ] **writer-authoring-claim-payload** — `AuthoringClaimPayload`
-  (subject_entity, attribute, value, assertion, thread_id, story_time,
-  reveal_time, grounding_mode, source_ref) + its `IPayloadDescriptor`.
-  Rides under `Fact`/`Evidence`. Redactable fields declared.
-- [ ] **writer-claims-into-triples** — Project authoring claims into the
-  existing `projection_fact_triples` (subject_key / predicate / object) so
-  base **contradiction detection covers narrative continuity for free** —
-  the structured `(subject, attribute, value)` substrate the writer domain
-  is missing under its LLM `Reconcile` pass.
+> **Thin vertical slice shipped (2026-08-09).** The high-signal core —
+> `AuthoringClaimPayload` → shared-canon triple projection → capability-guarded
+> continuity query — is implemented, packaged, and proven end-to-end (15 tests).
+> This de-risks the rest of 15.B. The remaining tasks (bitemporal, thread,
+> commitment, distiller, full query, sample) are unchecked below.
+
+- [x] **writer-project** — New packable `src/Mneme.Writer/` csproj
+  depending on the `Mneme` package (+ `Mneme.Contracts` with
+  `PrivateAssets="all"` so no phantom pkg dep); NuGet metadata + README;
+  added to `Mneme.slnx`. Release workflow already packs the whole solution,
+  so it is picked up automatically.
+- [x] **writer-authoring-claim-payload** — `AuthoringClaimPayload`
+  (Text/Subject/Attribute/Value + ScenePath/Quote/Status/SourceRef/ThreadId +
+  `AuthoringGrounding` knob) + its `AuthoringClaimDescriptor`
+  (`IPayloadDescriptor`). Rides under `Fact`. All free-text fields redactable.
+  Story-time/reveal-time ride on the envelope's existing `ValidAt`/`RecordedAt`.
+- [x] **writer-claims-into-triples** — `AuthoringCanonProjector` projects
+  each claim into the existing `projection_fact_triples` (subject_key /
+  predicate / object) and runs the shared contradiction engine, so base
+  **contradiction detection covers narrative continuity for free** — the
+  structured `(subject, attribute, value)` substrate the writer domain was
+  missing under its LLM `Reconcile` pass. Base seam extracted to a reusable
+  `FactTripleProjection` helper (the built-in Fact projectors now delegate to
+  it); no new schema — reuses `projection_fact_triples` + `memory_contradictions`.
 - [ ] **writer-bitemporal** — Use `valid_at` = story-time, `recorded_at`
   = reveal/discourse-time; an "as-of-section / what the reader knows as of
   chapter N" query. (Closes the writer domain's single-axis Timeline gap.)
@@ -988,9 +1000,12 @@ shapes (see the writer-domain agent) so it is drop-in.
   each tagged with story-time + reveal-time + grounding-mode).
 - [ ] **writer-query-service** — `IWriterMemory`: character/entity
   dossier, continuity check, unpaid-promise, as-of-section — over the base
-  query API + the writer projections.
-- [ ] **writer-profile** — `WriterProfile : IMnemeProfile` +
-  `AddMnemeWriterProfile()`; sample; per-type tests.
+  query API + the writer projections. _(Thin slice done: the
+  capability-guarded `GetContinuityConflictsAsync` continuity check shipped;
+  dossier / unpaid-promise / as-of-section pending.)_
+- [x] **writer-profile** — `WriterProfile : IMnemeProfile` +
+  `AddMnemeWriterProfile()`; per-type tests (15). _(Standalone runnable sample
+  deferred; MuxiMuxi is the real consumer, tracked in 15.C.)_
 
 ### 15.C — MuxiMuxi integration *(tracked in `devsanity-ai/muximuxi`, not here)*
 

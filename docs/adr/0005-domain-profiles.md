@@ -1,6 +1,6 @@
 # ADR-0005: Domain profiles via a base Profile SDK + satellite packages
 
-- **Status:** Proposed
+- **Status:** Accepted (implemented — Profile SDK in Phase 15.A; first satellite `Mneme.Writer` thin slice in Phase 15.B)
 - **Date:** 2026-08-09
 - **Deciders:** jacobmsft
 
