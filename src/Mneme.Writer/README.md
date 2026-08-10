@@ -32,18 +32,30 @@ services.AddMneme(o =>
   two scenes that disagree about the same subject + attribute (Helios's eyes are
   *blue* in ch. 2, *green* in ch. 9) surface as a **continuity conflict** for
   review — against base facts and other claims alike, in any ingest order.
-- **`IWriterMemory.GetContinuityConflictsAsync`** — the capability-guarded read
-  surface that lists open continuity conflicts in a workstream.
+- **`IWriterMemory`** — the capability-guarded read surface:
+  - `GetContinuityConflictsAsync` — open continuity conflicts in a workstream.
+  - `GetOpenCommitmentsAsync` — the manuscript's **unpaid promises / dangling
+    setups**: setups with no payoff sharing their commitment id.
+- **`NarrativeCommitmentPayload`** — one end of a **setup→payoff** promise. A
+  `Setup` (foreshadow / hook / stated intent / claimed contribution) and a later
+  `Payoff` share a stable `CommitmentId`; the ledger pairs them so an unpaid
+  promise is a first-class, persisted, queryable state — not a per-run LLM
+  verdict thrown away. Rides under the `Goal` category (a commitment is an
+  outcome the manuscript is pursuing). Owns its projection table
+  `projection_narrative_commitments`.
 
 ## What it deliberately does *not* add (thin slice)
 
-No schema of its own: it **reuses** base Mneme's `projection_fact_triples` and
-`memory_contradictions` tables. That reuse is the whole point — structured canon
-in, free contradiction detection out. Story-time vs. reveal-time bi-temporality
-rides on the event envelope's existing `ValidAt` / `RecordedAt` axes.
+The continuity half ships no schema of its own: it **reuses** base Mneme's
+`projection_fact_triples` and `memory_contradictions` tables. That reuse is the
+whole point — structured canon in, free contradiction detection out. Story-time
+vs. reveal-time bi-temporality rides on the event envelope's existing `ValidAt` /
+`RecordedAt` axes (both are stamped onto commitment ledger rows for a future
+"unpaid as of chapter N" query).
 
-Thread-status and setup→payoff (commitment) ledgers, the narrative distiller,
-and richer queries are later phases (see the repo backlog, Phase 15.B).
+Thread-status projection, the narrative distiller, and richer queries
+(character dossier, as-of-section) are later phases (see the repo backlog,
+Phase 15.B).
 
 ## License
 

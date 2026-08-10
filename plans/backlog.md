@@ -992,9 +992,15 @@ shapes (see the writer-domain agent) so it is drop-in.
 - [ ] **writer-thread-projection** — Persisted thread **status**
   (open / resolved / dangling) projection over `thread:<slug>` records
   (the writer domain has threads but no persisted status).
-- [ ] **writer-commitment-ledger** — Setup→payoff projection + an
-  "unpaid promises / dangling setups" query (the writer domain's mostly-
-  absent gap).
+- [x] **writer-commitment-ledger** — `NarrativeCommitmentPayload`
+  (Setup/Payoff sharing a `CommitmentId`, rides under `Goal`) +
+  `NarrativeCommitmentSchemaModule` (owns `projection_narrative_commitments` —
+  exercises the SDK's `ISchemaModule` path) + `NarrativeCommitmentProjector` +
+  `IWriterMemory.GetOpenCommitmentsAsync`. Setup→payoff pairing + an
+  **"unpaid promises / dangling setups"** query, visibility-filtered so a
+  payoff only closes a promise for viewers authorized to see it (the writer
+  domain's mostly-absent headline gap). Both bi-temporal axes stored on ledger
+  rows for a future as-of-section query.
 - [ ] **writer-distiller** — Narrative `ISessionDistiller` extraction
   prompt (characters/claims/relationships/world-rules/foreshadow seeds,
   each tagged with story-time + reveal-time + grounding-mode).

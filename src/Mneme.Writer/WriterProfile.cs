@@ -5,12 +5,12 @@ namespace Mneme.Writer;
 
 /// <summary>
 /// The writing-domain <see cref="IMnemeProfile"/> (ADR-0005 / Phase 15). It
-/// contributes one payload type (<see cref="AuthoringClaimPayload"/>) and one
-/// projector (<see cref="AuthoringCanonProjector"/>) that feeds the <b>shared</b>
-/// canon + contradiction substrate. It ships <b>no</b> schema module: the thin
-/// slice deliberately reuses base Mneme's <c>projection_fact_triples</c> and
-/// <c>memory_contradictions</c> tables, which is what makes deterministic
-/// manuscript continuity checking fall out of the base engine for free.
+/// contributes two payload types — <see cref="AuthoringClaimPayload"/> (rides the
+/// shared canon for continuity) and <see cref="NarrativeCommitmentPayload"/>
+/// (its own setup→payoff ledger) — with their descriptors, projectors, and the
+/// one schema module the ledger needs. The continuity half ships no schema (it
+/// reuses base Mneme's <c>projection_fact_triples</c> / <c>memory_contradictions</c>);
+/// the commitment half owns <c>projection_narrative_commitments</c>.
 /// </summary>
 /// <remarks>
 /// Register with <c>services.AddMneme(…).AddMnemeWriterProfile();</c>
@@ -23,12 +23,21 @@ public sealed class WriterProfile : IMnemeProfile
 
     /// <inheritdoc/>
     public IReadOnlyList<IPayloadDescriptor> PayloadDescriptors { get; } =
-        new IPayloadDescriptor[] { new AuthoringClaimDescriptor() };
+        new IPayloadDescriptor[]
+        {
+            new AuthoringClaimDescriptor(),
+            new NarrativeCommitmentDescriptor(),
+        };
 
     /// <inheritdoc/>
-    public IReadOnlyList<ISchemaModule> SchemaModules { get; } = Array.Empty<ISchemaModule>();
+    public IReadOnlyList<ISchemaModule> SchemaModules { get; } =
+        new ISchemaModule[] { new NarrativeCommitmentSchemaModule() };
 
     /// <inheritdoc/>
     public IReadOnlyList<IProjector> Projectors { get; } =
-        new IProjector[] { new AuthoringCanonProjector() };
+        new IProjector[]
+        {
+            new AuthoringCanonProjector(),
+            new NarrativeCommitmentProjector(),
+        };
 }

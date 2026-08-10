@@ -12,16 +12,23 @@ release notes.
 ### Added
 - **`Mneme.Writer` — first domain profile (satellite package).** A new packable
   package that teaches the substrate the writing domain's ontology (ADR-0005 /
-  Phase 15.B, thin vertical slice). It adds `AuthoringClaimPayload` — a
-  structured `(subject, attribute, value)` authoring claim, a superset of a flat
-  manuscript claim — whose `AuthoringCanonProjector` projects into the **shared**
-  `projection_fact_triples` index and runs the shared contradiction engine, so
-  **manuscript continuity checking is deterministic** (two scenes that disagree
-  about the same subject + attribute surface as a conflict) instead of a flat
-  digest handed to an LLM. Read surface: capability-guarded
-  `IWriterMemory.GetContinuityConflictsAsync`. Depends only on the base `Mneme`
-  package; ships no schema of its own (reuses `projection_fact_triples` +
-  `memory_contradictions`).
+  Phase 15.B). Two capabilities:
+  - **Deterministic continuity checking.** `AuthoringClaimPayload` — a structured
+    `(subject, attribute, value)` authoring claim, a superset of a flat
+    manuscript claim — whose `AuthoringCanonProjector` projects into the
+    **shared** `projection_fact_triples` index and runs the shared contradiction
+    engine, so two scenes that disagree about the same subject + attribute
+    surface as a conflict (via `IWriterMemory.GetContinuityConflictsAsync`)
+    instead of a flat digest handed to an LLM. Ships no schema of its own.
+  - **Setup→payoff ledger.** `NarrativeCommitmentPayload` (a `Setup` and a later
+    `Payoff` sharing a `CommitmentId`, riding under `Goal`) + its own
+    `projection_narrative_commitments` table, so the manuscript's **unpaid
+    promises / dangling setups** are a first-class, persisted, queryable state
+    (via `IWriterMemory.GetOpenCommitmentsAsync`) rather than a per-run verdict.
+    Visibility-filtered: a payoff only closes a promise for viewers authorized to
+    see it.
+
+  Depends only on the base `Mneme` package.
 
 ### Changed
 - **Base: extracted a reusable `FactTripleProjection` seam** (public, in
