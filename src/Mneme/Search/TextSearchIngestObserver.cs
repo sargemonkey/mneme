@@ -28,6 +28,8 @@ public sealed class TextSearchIngestObserver : IIngestObserver
         ActionPayload a     => a.Statement + " " + (a.ExternalReference ?? string.Empty),
         OutcomePayload o    => o.Statement,
         SkillPayload s      => s.Name + " " + s.Procedure + " " + (s.Trigger ?? string.Empty),
-        _                   => string.Empty,
+        // Satellite (domain-profile) payload: its descriptor supplies the text.
+        _                   => Mneme.Hosting.Profiles.PayloadDescriptorRegistry.TryGet(p.GetType())?.ExtractText(p)
+                               ?? string.Empty,
     };
 }

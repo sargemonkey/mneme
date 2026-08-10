@@ -7,9 +7,11 @@ namespace Mneme.Projections;
 /// <summary>
 /// Reads <c>memory_events</c> rows (with the LEFT JOIN onto
 /// <c>memory_revocations</c>) into typed <see cref="EventEnvelope"/>
-/// values for the projector pipeline.
+/// values for the projector pipeline. Public so <see cref="IProjector"/>
+/// implementations in satellite domain-profile packages can enumerate events
+/// during <see cref="IProjector.Rebuild"/> (ADR-0005).
 /// </summary>
-internal static class EventEnvelopeReader
+public static class EventEnvelopeReader
 {
     public static IEnumerable<EventEnvelope> ReadAll(SqliteConnection c, SqliteTransaction? tx, EpistemicCategory? categoryFilter)
     {

@@ -201,7 +201,9 @@ public static class DistillationPromptBuilder
         ActionPayload a     => a.Statement,
         OutcomePayload o    => o.Statement,
         SkillPayload s      => s.Name + (string.IsNullOrEmpty(s.Procedure) ? "" : " — " + s.Procedure),
-        _ => string.Empty,
+        // Satellite (domain-profile) payload: its descriptor supplies the summary.
+        _ => Mneme.Hosting.Profiles.PayloadDescriptorRegistry.TryGet(p.GetType())?.Summarize(p)
+             ?? string.Empty,
     };
 
     private static string Keyword(EventPayload p)

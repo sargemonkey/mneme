@@ -1,5 +1,9 @@
+using System.Linq;
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using Mneme.Contracts;
+using Mneme.Hosting.Profiles;
 
 namespace Mneme.Storage;
 
@@ -21,9 +25,21 @@ public static class EventSerialization
 {
     /// <summary>
     /// The single <see cref="JsonSerializerOptions"/> instance used for both
-    /// payload and provenance round-trips.
+    /// payload and provenance round-trips. Rebuilt when a domain profile
+    /// registers a new payload type (see <see cref="OnRegistryChanged"/>).
     /// </summary>
-    public static JsonSerializerOptions Options { get; } = BuildOptions();
+    public static JsonSerializerOptions Options => _options;
+
+    private static volatile JsonSerializerOptions _options = BuildOptions();
+
+    /// <summary>
+    /// Called by <see cref="PayloadDescriptorRegistry"/> when a satellite
+    /// payload is registered. Rebuilds <see cref="Options"/> from scratch so
+    /// the newly-registered <c>$type</c> is resolvable — this also side-steps
+    /// the "options frozen after first use" issue, since each rebuild is a
+    /// fresh, not-yet-frozen instance.
+    /// </summary>
+    internal static void OnRegistryChanged() => _options = BuildOptions();
 
     /// <summary>Serialize an event payload to its <c>payload_json</c> form.</summary>
     public static string SerializePayload(EventPayload payload)
@@ -56,6 +72,13 @@ public static class EventSerialization
 
     private static JsonSerializerOptions BuildOptions()
     {
+        // Start from the default (attribute-driven) resolver — which already
+        // knows the eight built-in payloads via [JsonDerivedType] on
+        // EventPayload — then APPEND any satellite payload types a domain
+        // profile has registered. The set stays closed + curated (ADR-0005):
+        // only registered, compiled types resolve.
+        var resolver = new DefaultJsonTypeInfoResolver();
+        resolver.Modifiers.Add(AppendRegisteredPayloadTypes);
         return new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -65,6 +88,28 @@ public static class EventSerialization
             // `<REDACTED:openai-key>` readable matters for ops and tests.
             Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
             WriteIndented = false,
+            TypeInfoResolver = resolver,
         };
+    }
+
+    // Append registered satellite payload types to EventPayload's polymorphism
+    // options. EventPayload already carries [JsonPolymorphic] so PolymorphismOptions
+    // is non-null here; we only ADD (never remove the built-ins).
+    private static void AppendRegisteredPayloadTypes(JsonTypeInfo typeInfo)
+    {
+        if (typeInfo.Type != typeof(EventPayload) || typeInfo.PolymorphismOptions is null)
+        {
+            return;
+        }
+        foreach (var descriptor in PayloadDescriptorRegistry.All)
+        {
+            var already = typeInfo.PolymorphismOptions.DerivedTypes
+                .Any(dt => dt.DerivedType == descriptor.PayloadType);
+            if (!already)
+            {
+                typeInfo.PolymorphismOptions.DerivedTypes.Add(
+                    new JsonDerivedType(descriptor.PayloadType, descriptor.Discriminator));
+            }
+        }
     }
 }

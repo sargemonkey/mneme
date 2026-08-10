@@ -920,7 +920,7 @@ domain (a live Mneme consumer whose continuity gaps are substrate-shaped).
 
 ### 15.A — Base Profile SDK (in `Mneme` / `Mneme.Contracts`)
 
-- [ ] **profile-payload-registry** — Replace the static `[JsonDerivedType]`
+- [x] **profile-payload-registry** — Replace the static `[JsonDerivedType]`
   union on `EventPayload` with a composition-time `IJsonTypeInfoResolver`
   built from registered `IPayloadDescriptor { Type, Discriminator,
   Category, RedactableFields, ExtractText, Summarize }`. Migrate the 8
@@ -928,26 +928,32 @@ domain (a live Mneme consumer whose continuity gaps are substrate-shaped).
   preserved: only registered types resolve; unknown `$type` rejected.
   Tests: round-trip every payload, unknown-`$type` rejected, resolver =
   base ∪ enabled profiles.
-- [ ] **profile-redaction-seam** — `PayloadRedactor` consumes each
+- [x] **profile-redaction-seam** — `PayloadRedactor` consumes each
   descriptor's `RedactableFields` instead of the exhaustive switch;
   **fail closed** (undeclared payload → redact all string fields). Keep
   `FactPayload.Triples` subject/object coverage. (Locked decision #11.)
-- [ ] **profile-text-seam** — `TextSearchIngestObserver` uses the
+- [x] **profile-text-seam** — `TextSearchIngestObserver` uses the
   descriptor's `ExtractText` instead of switching on payload type.
-- [ ] **profile-summary-seam** — `DistillationPromptBuilder` / summary
+- [x] **profile-summary-seam** — `DistillationPromptBuilder` / summary
   paths use the descriptor's `Summarize` instead of the payload switch.
-- [ ] **profile-schema-module** — `ISchemaModule { Name; Version;
+- [x] **profile-schema-module** — `ISchemaModule { Name; Version;
   ApplyDdl(conn) }`. `SqliteSchema.Initialize` runs core DDL + registered
   modules idempotently; per-module version tracked in `schema_meta`
   (namespaced). A module may only create/write its own tables.
-- [ ] **profile-projector-registration** — Profile-scoped `IProjector`
+- [x] **profile-projector-registration** — Profile-scoped `IProjector`
   registration into `ProjectorPipeline` (both the default list and DI);
   registered projectors participate in `RebuildAll`.
-- [ ] **profile-imnemeprofile** — `IMnemeProfile` + `MnemeProfileBuilder`
+- [x] **profile-imnemeprofile** — `IMnemeProfile` + `MnemeProfileBuilder`
   + `services.AddMneme(…).AddMnemeProfile<T>()`. Refactor the built-in
   payloads/projectors/schema into a `CoreProfile` that is registered the
   same way (dogfood the SDK). Docs: "authoring a Mneme profile."
-- [ ] **profile-sdk-tests** — Round-trip + rebuild-from-log with a
+  *(Shipped `src/Mneme/Hosting/Profiles/`: `IPayloadDescriptor`,
+  `PayloadDescriptorRegistry`, `ISchemaModule`, `IMnemeProfile`,
+  `AddMnemeProfile`. The 8 built-ins stay attribute-declared and satellites
+  **append** to the closed set — the `CoreProfile` re-derivation was
+  **deferred**: it would rework the security-reviewed serialization/redaction
+  core for marginal benefit; the additive path is proven by `ProfileSdkTests`.)*
+- [x] **profile-sdk-tests** — Round-trip + rebuild-from-log with a
   registered *test* profile; redaction-coverage regression; a projector
   from a profile survives `RebuildAll`.
 

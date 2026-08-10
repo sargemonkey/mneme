@@ -106,8 +106,17 @@ internal static class PayloadRedactor
                         had, hits);
             }
             default:
+                // Satellite (domain-profile) payload: its descriptor owns
+                // redaction (locked decision #11). If none is registered we
+                // fail closed — nothing un-redacted is persisted.
+                var descriptor = Mneme.Hosting.Profiles.PayloadDescriptorRegistry.TryGet(payload.GetType());
+                if (descriptor is not null)
+                {
+                    return descriptor.Redact(payload, redactor);
+                }
                 throw new NotSupportedException(
-                    $"Unknown payload type {payload.GetType().FullName}. Add a case to PayloadRedactor.");
+                    $"Unknown payload type {payload.GetType().FullName}. Add a built-in case to " +
+                    "PayloadRedactor, or register an IPayloadDescriptor for it via a Mneme profile.");
         }
     }
 }

@@ -95,7 +95,11 @@ public static class MnemeServiceCollectionExtensions
                 new Mneme.Projections.Projectors.HypothesesProjector(),
                 new Mneme.Projections.Projectors.SkillsProjector(),
                 new DecisionChainsProjector(),
-            }));
+            }
+            // Append any projectors contributed by domain profiles
+            // (AddMnemeProfile registers them as IProjector services). Resolved
+            // lazily, so profiles registered after AddMneme are still included.
+            .Concat(sp.GetServices<IProjector>())));
         services.TryAddSingleton<TextSearchService>(sp => new TextSearchService(
             sp.GetRequiredService<SqliteConnectionFactory>()));
         services.TryAddSingleton<VectorIndex>(sp => new VectorIndex(
