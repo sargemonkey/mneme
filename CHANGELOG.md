@@ -202,7 +202,7 @@ into `Mneme`), `Mneme.Agents.AI`, `Mneme.Mcp`.
   parity; 80.3% at ~9× less context**).
 - CI workflow (`ci.yml`, build + test, warnings-as-errors) and a tag-driven
   **release workflow** (`release.yml`) that packs + pushes to nuget.org.
-- ADR index (`docs/adr/`) and publishing runbook (`docs/PUBLISHING.md`).
+- ADR index (`docs/adr/`).
 
 ### Performance
 - Query hot paths batch candidate/subject-key lookups into single queries

@@ -146,7 +146,6 @@ It exposes `remember`, `query`, `distill_session`, `get_watermark`, and more.
 | [USAGE.md](USAGE.md) | End-to-end host integration guide. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Deep technical walkthrough + design rationale. |
 | [docs/why-continuous-memory.md](docs/why-continuous-memory.md) | Primer: why agent memory matters and where Mneme fits. |
-| [docs/PUBLISHING.md](docs/PUBLISHING.md) | Release + NuGet publishing runbook. |
 | [docs/adr/](docs/adr/) | Architecture decision records. |
 | [benchmarks/…/RESULTS.md](benchmarks/Mneme.Benchmarks.LoCoMo/RESULTS.md) | LoCoMo benchmark methodology + numbers. |
 | [AGENTS.md](AGENTS.md) | Onboarding + conventions for AI coding agents. |
